@@ -142,17 +142,20 @@ get_paren_type(Arg) ->
 	{paren, get_args_type(Children)}.
 
 get_simple_type(Elem) ->
-	Tag = ?Typexp:tag(Elem), 
+    Tag = ?Typexp:tag(Elem),
+    [Elem_parent] = ?Typexp:parent(Elem),
 
-	case Tag of
-		atom  -> atom;
-		integer  -> integer;
-		float    -> float;
-		boolean  -> boolean;
-		term     -> term;
-		number   -> number;
-		Literal  -> get_literal_type(Elem)
-	end.
+    case ?Typexp:type(Elem_parent) of
+        call ->  case Tag of
+                    atom    -> atom;
+                    integer -> integer;
+                    float   -> float;
+                    boolean -> boolean;
+                    term    -> term;
+                    number  -> number
+                end;
+        _   -> get_literal_type(Elem)
+    end.
 
 get_literal_type(Elem) ->
 	case ?Typexp:type(Elem) of
@@ -171,20 +174,24 @@ get_var_type(Var) ->
 	{variable, [?Typexp:tag(Var)]}.
 
 
+
+
+
+
+
+
+
 %----------------For testing purposes--------------------------------------------------
-
-
-test(Module_name) ->
-    All_specs = get_all_specs(Module_name),
-    Test_cases = f(),
-    get_funcs_sig(All_specs, Test_cases).
-
 get_all_specs(Module_name) ->
     Mod = ?Query:exec(?Mod:find(Module_name)),
     ?Query:exec(Mod, ?Mod:specs()).
 
-get_funcs_sig([], _) -> " ";
-get_funcs_sig([Spec | Specs], [Test_case | Test_cases]) ->
+test(Module_name) ->
+    All_specs = get_all_specs(Module_name),
+    get_funcs_sig(All_specs).
+
+get_funcs_sig([]) -> " ";
+get_funcs_sig([Spec | Specs]) ->
     Name = ?Spec:name(Spec),
     erlang:display(Name),
     erlang:display(" "),
@@ -193,9 +200,25 @@ get_funcs_sig([Spec | Specs], [Test_case | Test_cases]) ->
     Mod_name = ?Mod:name(Mod),
     Res = get_spec_type(Mod_name, Name, Arity),
     erlang:display(Res),
-    %erlang:display(Res == Test_case),
-    %erlang:display("-----------------------------------"),
-    get_funcs_sig(Specs, Test_cases).
+    erlang:display("-----------------------------------"),
+    get_funcs_sig(Specs).
+
+test2(Module_name) ->
+    All_specs = get_all_specs(Module_name),
+    Test_cases = f(),
+    get_funcs_sig2(All_specs, Test_cases).
+
+get_funcs_sig2([], _) -> " ";
+get_funcs_sig2([Spec | Specs], [T | Ts]) ->
+    Name = ?Spec:name(Spec),
+    Arity = ?Spec:arity(Spec),
+    [Mod] = ?Query:exec(Spec, ?Spec:module()),
+    Mod_name = ?Mod:name(Mod),
+    Res = get_spec_type(Mod_name, Name, Arity),
+    erlang:display(Res == T),
+    get_funcs_sig2(Specs, Ts).
+
+%gfdsf
 
 f() ->
     [
