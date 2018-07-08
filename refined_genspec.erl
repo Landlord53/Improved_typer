@@ -4,18 +4,37 @@
 %1)Process guard expressions(В разделе "Defining actual clauses")
 %2)Process fun expressions  (В разделе "Defining actual clauses")
 %3)Добавить проверку, что если паттерн абсолютно совпадает с actual parameters, не проверять дальше.
+%4)Функция get_fun_name не обрабатывает случай, когда можду именем функции и скобками есть пробелы.
 -include("user.hrl").
 -include("spec.hrl").
 
 -compile(export_all).
 
-main(Mod_name) ->
+test_expr_inference(Mod_name, Fun_name, Arity) ->
 	Path = get_path(Mod_name),
-	Specs = get_typer_specs(Path),
-	Spec1 = lists:nth(1, Specs), %------------------------------------for testing
-	erlang:display(Spec1),
-	Fun_name = get_fun_name(Spec1),
-	Arity = get_arity(Spec1),
+	Fun_node = get_fun_node(Mod_name, Fun_name, Arity),
+	Fun_def = get_fundef(Fun_node),
+	Clauses = get_clauses(Fun_def),
+	lists:map(fun(Clause) -> get_clause_type(Clause) end, Clauses).
+
+get_clause_type(Clause) ->
+	Bodies = get_bodies(Clause),
+	define_bodies_type(Bodies, []).
+
+define_bodies_type([], _) -> [];
+define_bodies_type([Last_body], Variables) ->
+	infer_expr_inf(Last_body, Variables);
+define_bodies_type([Body | Bodies], Variables) ->
+	Body_type = infer_expr_inf(Body, Variables),
+
+		case Body_type of
+			{Var_name, {Type, Value}} -> define_bodies_type(Bodies, [Body_type | Variables]);
+			_                         -> define_bodies_type(Bodies, Variables)
+		end.
+
+
+test_finding_actual_clauses(Mod_name, Fun_name, Arity) ->
+	Path = get_path(Mod_name),
 	Fun_node = get_fun_node(Mod_name, Fun_name, Arity),
 	Applications = get_applications(Fun_node),
 	Application  = hd(Applications), %--------------------------------for testing
@@ -29,55 +48,40 @@ main(Mod_name) ->
 			[] -> 	Fun_def = Fun_def,
 					get_clauses(Fun_def);
 			_  ->   find_actual_clause(Patterns, Actual_params)   
-		 end,
-	%Bodies = get_bodies(Actual_clause),
-	infer_clause_type(Actual_clause).
-	%[infer_body_type(Body) || Body <- Bodies].
-	%infer_body_type(hd(Bodies)).
-	%Infered_type = infer_type(Actual_clause).
-
-	%Actual_patterns = get_patterns(Actual_clauses),
-	%[print_expr_val(Actual_pattern) || Actual_clause <- Actual_clauses].
+		 end.
+%	lists:map(fun(Clause) -> get_clause_type(Clause) end, Actual_clause).
 
 %---------------------------------Inference part-----------------------------------------------
-get_path(Mod_name) ->
-	Mod = ?Query:exec(?Mod:find(Mod_name)),
-	File = ?Query:exec(Mod, ?Mod:file()),
-
-	case File of
-		[]  -> [];
-		[F] -> ?File:path(F)
-	end.
-
-infer_clause_type(Clause) ->
-	Bodies = get_bodies(Clause),
-	infer_last_body_type(Bodies, []).
-
-
-infer_last_body_type([], _) -> [];
-infer_last_body_type([Body], Variables) ->
-	infer_expr_inf(Body, Variables);
-infer_last_body_type([Body | Bodies], Variables) ->
-	Body_inf = infer_expr_inf(Body, Variables),
-	case Body_inf of
-		{Var, {Type, Value}} -> infer_last_body_type(Bodies, [{Var, {Type, Value}} | Variables]);
-		{Type, Value}        -> infer_last_body_type(Bodies, Variables)
-	end.
 
 infer_expr_inf(Expr, Variables) ->
 	case ?Expr:type(Expr) of
 		match_expr -> infer_match_expr_inf(Expr, Variables);
 		infix_expr -> infer_infix_expr_type(Expr, ?Expr:value(Expr), Variables);
-		integer    -> {integer, ?Expr:value(Expr)};
-		float      -> {float, ?Expr:value(Expr)};
 		variable   -> Var = lists:filter(fun({V, _}) -> ?Expr:value(Expr) == V end, Variables),
-					  erlang:display(Var),	
+					  %erlang:display(Var),	
 					  case Var of 
 					  	[] -> {any, undefinied};
 					  	[{V, {Type, Val}}] -> {Type, Val}
 					  end;
-		parenthesis -> infer_parenthesis_inf(Expr, Variables)
+		parenthesis -> infer_parenthesis_inf(Expr, Variables);
+		application -> get_fun_app_type(Expr);
+		Simple_type    -> {Simple_type, ?Expr:value(Expr)}
 	end.
+
+get_fun_app_type(Expr) ->
+	[Expr1, Arglist] = ?Query:exec(Expr, ?Expr:children()),
+	[Module, Fun] = 
+		case ?Expr:value(Expr1) of
+			':' -> ?Query:exec(Expr1, ?Expr:children());
+			_   -> [4, 5]
+		end,
+
+	Args = ?Query:exec(Arglist, ?Expr:children()),
+	Arity = length(Args),
+	Module_name = ?Expr:value(Module),
+	Fun_name = ?Expr:value(Fun),
+	spec_proc:get_spec_type(Module_name, Fun_name, Arity).
+
 
 infer_parenthesis_inf(Expr, Variables) ->
 	[Child] = get_children(Expr),
@@ -92,7 +96,7 @@ infer_infix_expr_type(Expr, Operation, Variables) ->
 	[Sub_expr1, Sub_expr2] = get_children(Expr),
 	Expr_inf1 = infer_expr_inf(Sub_expr1, Variables),
 	Expr_inf2 = infer_expr_inf(Sub_expr2, Variables),
-	erlang:display(Expr_inf1),
+	%erlang:display(Expr_inf1),
 %Добавить проверку на правильность типа	
 	compute_infix_expr(Expr_inf1, Expr_inf2, Operation).
 
@@ -121,6 +125,15 @@ compute_infix_expr({_Type1, Val1}, {_Type2, Val2}, '*') ->
 compute_infix_expr({_Type1, Val1}, {_Type2, Val2}, '/') ->
 	{float, Val1 / Val2}.
 %---------------------------------Helper functions---------------------------------------------
+get_path(Mod_name) ->
+	Mod = ?Query:exec(?Mod:find(Mod_name)),
+	File = ?Query:exec(Mod, ?Mod:file()),
+
+	case File of
+		[]  -> [];
+		[F] -> ?File:path(F)
+	end.
+
 get_bodies(Clause) ->
 	?Query:exec(Clause, ?Clause:body()).
 
@@ -193,8 +206,8 @@ compare_tuples(_T1, _T2) ->
 compare_cons(Con1, Con2) ->
 	Children1 = construct_list_from_cons_expr(Con1),
 	Children2 = construct_list_from_cons_expr(Con2),
-	erlang:display(Children1),
-	erlang:display(Children2),
+	%erlang:display(Children1),
+	%erlang:display(Children2),
 	Res = compare_lists_elems(Children1, Children2),
 	conclude(Res, true).
 
@@ -259,14 +272,14 @@ constract_list_from_list_expr(L) ->
 compare_simple_type(Pat, Par) ->
 	?Expr:value(Pat) =:= ?Expr:value(Par).
 
-%--------------------Extraction of a function specification--------------------------------------
+%--------------------Extraction of a function specification from the typer result--------------------------------------
 extract_matches([]) -> [];
 extract_matches([H | T]) ->
 	[hd(H) | extract_matches(T)]. 
 
 get_fun_node(Mod_name, Fun_name, Arity) ->
 	[Mod] = ?Query:exec(?Mod:find(Mod_name)),
-	?Query:exec(Mod, ?Mod:local(list_to_atom(Fun_name), Arity)).
+	?Query:exec(Mod, ?Mod:local(Fun_name, Arity)).
 
 get_typer_specs(Path) ->
 	Spec = os:cmd("typer " ++ [$" | Path] ++ "\""),
@@ -314,6 +327,28 @@ compute_arity([$>, $> | T], List, Tupple, Fun, Binary, Arity) ->
 	compute_arity(T, List, Tupple, Fun, Binary - 1, Arity);
 compute_arity([_ | T], List, Tupple, Fun, Binary, Arity) ->
 	compute_arity(T, List, Tupple, Fun, Binary, Arity).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 %--------------------------------Testing------------------------------------------
 print_expr_val(Expr) ->

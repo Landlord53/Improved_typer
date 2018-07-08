@@ -7,13 +7,18 @@
 get_spec_type(Module_name, Fun_name, Arity) ->
 	Mod = ?Query:exec(?Mod:find(Module_name)),
 	Spec = ?Query:exec(Mod, ?Spec:find(Fun_name, Arity)),
-	Form = ?Query:exec(Spec, [{specdef, back}]),
-	[_, Tattr2] = ?Query:exec(Form, [tattr]),
 
-	case ?Typexp:type(Tattr2) of
-		fun_sig    -> process_funsig(Tattr2);
-		spec_guard -> Type_vars = process_spec_guard(Tattr2)
-	end.
+    case Spec of 
+        [] -> [];
+        _  ->   Form = ?Query:exec(Spec, [{specdef, back}]),
+                [_, Tattr2] = ?Query:exec(Form, [tattr]),
+
+                case ?Typexp:type(Tattr2) of
+                    fun_sig    -> process_funsig(Tattr2);
+                    spec_guard -> Type_vars = process_spec_guard(Tattr2)
+                end
+    end.
+
 
 find_first_match([], _) -> [];
 find_first_match([{Var_name1, Type1} | Xs], Var_name2) ->
@@ -203,8 +208,8 @@ get_funcs_sig([Spec | Specs]) ->
     erlang:display("-----------------------------------"),
     get_funcs_sig(Specs).
 
-test2(Module_name) ->
-    All_specs = get_all_specs(Module_name),
+test2() ->
+    All_specs = get_all_specs(lists),
     Test_cases = f(),
     get_funcs_sig2(All_specs, Test_cases).
 
