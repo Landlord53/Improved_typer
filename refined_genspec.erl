@@ -68,11 +68,11 @@ infer_expr_inf(Expr, Variables) ->
 		Simple_type    -> {Simple_type, ?Expr:value(Expr)}
 	end.
 
-get_fun_app_type(Expr) ->
-	[Expr1, Arglist] = ?Query:exec(Expr, ?Expr:children()),
+get_fun_app_type(Fun_app) ->
+	[Expr, Arglist] = ?Query:exec(Fun_app, ?Expr:children()),
 	[Module, Fun] = 
-		case ?Expr:value(Expr1) of
-			':' -> ?Query:exec(Expr1, ?Expr:children());
+		case ?Expr:value(Expr) of
+			':' -> ?Query:exec(Expr, ?Expr:children());
 			_   -> [4, 5]
 		end,
 
@@ -80,7 +80,8 @@ get_fun_app_type(Expr) ->
 	Arity = length(Args),
 	Module_name = ?Expr:value(Module),
 	Fun_name = ?Expr:value(Fun),
-	spec_proc:get_spec_type(Module_name, Fun_name, Arity).
+	{_, [Return_type]} = spec_proc:get_spec_type(Module_name, Fun_name, Arity),
+	Return_type.
 
 
 infer_parenthesis_inf(Expr, Variables) ->
@@ -100,14 +101,20 @@ infer_infix_expr_type(Expr, Operation, Variables) ->
 %Добавить проверку на правильность типа	
 	compute_infix_expr(Expr_inf1, Expr_inf2, Operation).
 
-compute_infix_expr({float, _Value1}, {_Type2, _Value2}, _Operation) ->
+compute_infix_expr({float, []}, {_Type2, _Value2}, _Operation) ->
 	{float, undefinied};
-compute_infix_expr({_Type1, _Value1}, {float, _Value2}, _Operation)  ->
+compute_infix_expr({_Type1, _Value1}, {float, []}, _Operation)  ->
 	{float, undefinied};
-compute_infix_expr({any, _Value1}, {any, _Value2}, _Operation)  ->
-	{number, undefinied};
-compute_infix_expr({Type1, _Value1}, {Type2, _Value2}, _) when (Type1 == any) or (Type2 == any)  ->
-	{number, undefinied};
+
+
+%compute_infix_expr({float, _Value1}, {_Type2, _Value2}, _Operation) ->
+%	{float, undefinied};
+%compute_infix_expr({_Type1, _Value1}, {float, _Value2}, _Operation)  ->
+%	{float, undefinied};
+%compute_infix_expr({any, _Value1}, {any, _Value2}, _Operation)  ->
+%	{number, undefinied};
+%compute_infix_expr({Type1, _Value1}, {Type2, _Value2}, _) when (Type1 == any) or (Type2 == any)  ->
+%	{number, undefinied};
 compute_infix_expr({Type1, _Value1}, {Type2, _Value2}, _) when (Type1 == number) or (Type2 == number)  ->
 	{number, undefinied};
 compute_infix_expr({Type1, Val1}, {Type2, Val2}, '+')  when is_float(Val1) or is_float(Val2) ->

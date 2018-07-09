@@ -73,24 +73,24 @@ process_spec_guard(Tattr) ->
 			guardlist  -> ?Query:exec(Guard, ?Typexp:children());
 			vardef -> [Guard]
 		end,
-	Guard_types = get_args_type(Guard_children),
+	Guard_types = get_spec_elems_type(Guard_children),
 	Guard_replaced_type = replace_type_vars(Guard_types, Guard_types),
 	{Args, Ret_type} = process_funsig(Funsig),
 	{Replaced_args, Replaced_return_val} = {replace_noneguard_vars(Args, Guard_replaced_type), replace_noneguard_vars(Ret_type, Guard_replaced_type)},
 	Args_type = lists:map(fun({Var_name, Type}) -> Type end, Replaced_args),
 	Return_type = lists:map(fun({Var_name, Type}) -> Type end, Replaced_return_val),
-	{Args_type, Return_type},
+	%{Args_type, Return_type}.
 	{Replaced_args, Replaced_return_val}.%Only for testing purposes
 
 process_funsig(Funsig_expr) ->
 	[Arglist, Return] = ?Query:exec(Funsig_expr, ?Typexp:children()),
 	Args = ?Query:exec(Arglist, ?Typexp:children()),
-	{get_args_type(Args), get_args_type([Return])}.
+	{get_spec_elems_type(Args), get_spec_elems_type([Return])}.
 	
-get_args_type([]) ->
+get_spec_elems_type([]) ->
 	[];
-get_args_type([Arg | Args]) ->
-	[get_spec_elem_type(Arg) | get_args_type(Args)].
+get_spec_elems_type([Arg | Args]) ->
+	[get_spec_elem_type(Arg) | get_spec_elems_type(Args)].
 
 get_vardef_inf(Arg) ->
 	[Name, Type] = ?Query:exec(Arg, ?Typexp:children()),
@@ -126,25 +126,29 @@ drop_var_names([Var | Vars]) ->
 get_call_type(Call) ->
 	[Type, Arg_list] = ?Query:exec(Call, ?Typexp:children()),
 	Children = ?Query:exec(Arg_list, ?Typexp:children()),
-	{?Typexp:tag(Type), get_args_type(Children)}.
-	
+
+    case Children of
+        [] -> {?Typexp:tag(Type), []};
+        _  -> [Elem_type] = get_spec_elems_type(Children),
+              Elem_type
+    end.
 
 get_list_type(List) ->
 	case ?Typexp:tag(List) of
-		empty        -> {list, []};
+		empty        -> {list, [[]]};
 		any          -> Children = ?Query:exec(List, ?Typexp:children()),
-				 		{list, get_args_type(Children)};
+				 		{list, get_spec_elems_type(Children)};
 		nonempty     -> Children = ?Query:exec(List, ?Typexp:children()),
-				 		{list, get_args_type(Children) ++ ['...']}
+				 		{list, get_spec_elems_type(Children) ++ ['...']}
 	end.
 		
 get_tuple_type(Arg) ->
 	Children = ?Query:exec(Arg, ?Typexp:children()),
-	{tuple, get_args_type(Children)}.
+	{tuple, get_spec_elems_type(Children)}.
 
 get_paren_type(Arg) ->
 	Children = ?Query:exec(Arg, ?Typexp:children()),
-	{paren, get_args_type(Children)}.
+	{paren, get_spec_elems_type(Children)}.
 
 get_simple_type(Elem) ->
     Tag = ?Typexp:tag(Elem),
@@ -166,13 +170,13 @@ get_literal_type(Elem) ->
 	case ?Typexp:type(Elem) of
 		negate -> [Child] = ?Query:exec(Elem, ?Typexp:children()),
 			      {Type, Value} = get_spec_elem_type(Child),
-			      {Type, -Value};
-		_      -> {?Typexp:type(Elem), ?Typexp:tag(Elem)}
+			      {Type, [-Value]};
+		_      -> {?Typexp:type(Elem), [?Typexp:tag(Elem)]}
 	end.
 
 get_union_type(Arg) ->
 	Children = ?Query:exec(Arg, ?Typexp:children()),
-	Union_type = get_args_type(Children),
+	Union_type = get_spec_elems_type(Children),
 	{union, Union_type}.
 
 get_var_type(Var) -> 
@@ -228,11 +232,11 @@ get_funcs_sig2([Spec | Specs], [T | Ts]) ->
 f() ->
     [
         %keyfind
-        {[{"Key",{term,[]}},{"N",{pos_integer,[]}},{"TupleList",{list,[{tuple,[]}]}}],[{union,[{tuple,[]},{atom,false}]}]},
+        {[{"Key",{term,[]}},{"N",{pos_integer,[]}},{"TupleList",{list,[{tuple,[]}]}}],[{union,[{tuple,[]},{atom,[false]}]}]},
         %keymember
         {[{"Key",{term,[]}},{"N",{pos_integer,[]}},{"TupleList",{list,[{tuple,[]}]}}],[{boolean,[]}]},
         %keysearch
-        {[{"Key",{term,[]}},{"N",{pos_integer,[]}},{"TupleList",{list,[{tuple,[]}]}}],[{union,[{tuple,[{atom,value},{tuple,[]}]},{atom,false}]}]},
+        {[{"Key",{term,[]}},{"N",{pos_integer,[]}},{"TupleList",{list,[{tuple,[]}]}}],[{union,[{tuple,[{atom,[value]},{tuple,[]}]},{atom,[false]}]}]},
         %member
         {[{"Elem",{term,[]}},{"List",{list,[{term,[]}]}}],[{boolean,[]}]},
         %reverse
@@ -312,7 +316,7 @@ f() ->
         %keyreplace
         {[{"Key",{term,[]}},{"N",{pos_integer,[]}},{"TupleList1",{list,[{tuple,[]}]}},{"NewTuple",{tuple,[]}}],[{"TupleList2",{list,[{tuple,[]}]}}]},
         %keytake
-        {[{"Key",{term,[]}},{"N",{pos_integer,[]}},{"TupleList1",{list,[{tuple,[]}]}}],[{union,[{tuple,[{atom,value},{tuple,[]},{list,[{tuple,[]}]}]},{atom,false}]}]},
+        {[{"Key",{term,[]}},{"N",{pos_integer,[]}},{"TupleList1",{list,[{tuple,[]}]}}],[{union,[{tuple,[{atom,[value]},{tuple,[]},{list,[{tuple,[]}]}]},{atom,[false]}]}]},
         %keystore
         {[{"Key",{term,[]}},{"N",{pos_integer,[]}},{"TupleList1",{list,[{tuple,[]}]}},{"NewTuple",{tuple,[]}}],[{"TupleList2",{list,[{tuple,[]},'...']}}]},
         %keysort
@@ -370,11 +374,11 @@ f() ->
         %partition
         {[{"Pred",{func,[[{term,[]}],[{boolean,[]}]]}},{"List",{list,[{term,[]}]}}],[{tuple,[{list,[{term,[]}]},{list,[{term,[]}]}]}]},
         %filtermap
-        {[{"Fun",{func,[[{term,[]}],[{union,[{boolean,[]},{tuple,[{atom,true},{term,[]}]}]}]]}},{"List1",{list,[{term,[]}]}}],[{"List2",{list,[{union,[{term,[]},{term,[]}]}]}}]},
+        {[{"Fun",{func,[[{term,[]}],[{union,[{boolean,[]},{tuple,[{atom,[true]},{term,[]}]}]}]]}},{"List1",{list,[{term,[]}]}}],[{"List2",{list,[{union,[{term,[]},{term,[]}]}]}}]},
         %zf
-        {[{func,[[{variable,["T"]}],[{union,[{boolean,[]},{tuple,[{atom,true},{variable,["X"]}]}]}]]},{list,[{variable,["T"]}]}],[{list,[{paren,[{union,[{variable,["T"]},{variable,["X"]}]}]}]}]},
+        {[{func,[[{variable,["T"]}],[{union,[{boolean,[]},{tuple,[{atom,[true]},{variable,["X"]}]}]}]]},{list,[{variable,["T"]}]}],[{list,[{paren,[{union,[{variable,["T"]},{variable,["X"]}]}]}]}]},
         %foreach
-        {[{"Fun",{func,[[{term,[]}],[{term,[]}]]}},{"List",{list,[{term,[]}]}}],[{atom,ok}]},
+        {[{"Fun",{func,[[{term,[]}],[{term,[]}]]}},{"List",{list,[{term,[]}]}}],[{atom,[ok]}]},
         %mapfoldl
         {[{"Fun",{func,[[{term,[]},{term,[]}],[{tuple,[{term,[]},{term,[]}]}]]}},{"Acc0",{term,[]}},{"List1",{list,[{term,[]}]}}],[{tuple,[{list,[{term,[]}]},{term,[]}]}]},
         %mapfoldr
