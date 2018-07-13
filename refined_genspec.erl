@@ -5,13 +5,13 @@
 %2)Process fun expressions  (В разделе "Defining actual clauses")
 %3)Добавить проверку, что если паттерн абсолютно совпадает с actual parameters, не проверять дальше.
 %4)Функция get_fun_name не обрабатывает случай, когда можду именем функции и скобками есть пробелы.
+%5)Добавить ":" d infix expressions.
 -include("user.hrl").
 -include("spec.hrl").
 
 -compile(export_all).
 
 test_expr_inference(Mod_name, Fun_name, Arity) ->
-	Path = get_path(Mod_name),
 	Fun_node = get_fun_node(Mod_name, Fun_name, Arity),
 	Fun_def = get_fundef(Fun_node),
 	Clauses = get_clauses(Fun_def),
@@ -26,15 +26,15 @@ define_bodies_type([Last_body], Variables) ->
 	infer_expr_inf(Last_body, Variables);
 define_bodies_type([Body | Bodies], Variables) ->
 	Body_type = infer_expr_inf(Body, Variables),
+	%erlang:display(Body_type),
 
 		case Body_type of
-			{Var_name, {Type, Value}} -> define_bodies_type(Bodies, [Body_type | Variables]);
+			{_Var_name, {_Type, _Value}} -> define_bodies_type(Bodies, [Body_type | Variables]);
 			_                         -> define_bodies_type(Bodies, Variables)
 		end.
 
 
 test_finding_actual_clauses(Mod_name, Fun_name, Arity) ->
-	Path = get_path(Mod_name),
 	Fun_node = get_fun_node(Mod_name, Fun_name, Arity),
 	Applications = get_applications(Fun_node),
 	Application  = hd(Applications), %--------------------------------for testing
@@ -43,25 +43,26 @@ test_finding_actual_clauses(Mod_name, Fun_name, Arity) ->
 	Fun_def = get_fundef(Fun_node),
 	Clauses = get_clauses(Fun_def),
 	Patterns = [get_patterns(Clause) || Clause <- Clauses],
-	Actual_clause = 
-		case Actual_params of
-			[] -> 	Fun_def = Fun_def,
-					get_clauses(Fun_def);
-			_  ->   find_actual_clause(Patterns, Actual_params)   
-		 end.
+
+	case Actual_params of
+		[] -> 	Fun_def = Fun_def,
+				get_clauses(Fun_def);
+		_  ->   find_actual_clause(Patterns, Actual_params)   
+	end.
 %	lists:map(fun(Clause) -> get_clause_type(Clause) end, Actual_clause).
 
 %---------------------------------Inference part-----------------------------------------------
 
 infer_expr_inf(Expr, Variables) ->
 	case ?Expr:type(Expr) of
+		prefix_expr -> infer_prefix_expr_type(Expr, ?Expr:value(Expr), Variables);
 		match_expr -> infer_match_expr_inf(Expr, Variables);
 		infix_expr -> infer_infix_expr_type(Expr, ?Expr:value(Expr), Variables);
 		variable   -> Var = lists:filter(fun({V, _}) -> ?Expr:value(Expr) == V end, Variables),
 					  %erlang:display(Var),	
 					  case Var of 
-					  	[] -> {any, undefinied};
-					  	[{V, {Type, Val}}] -> {Type, Val}
+					  	[] -> {any, []};
+					  	[{_V, {Type, Val}}] -> {Type, Val}
 					  end;
 		parenthesis -> infer_parenthesis_inf(Expr, Variables);
 		application -> get_fun_app_type(Expr);
@@ -83,7 +84,6 @@ get_fun_app_type(Fun_app) ->
 	{_, [Return_type]} = spec_proc:get_spec_type(Module_name, Fun_name, Arity),
 	Return_type.
 
-
 infer_parenthesis_inf(Expr, Variables) ->
 	[Child] = get_children(Expr),
 	infer_expr_inf(Child, Variables).
@@ -97,50 +97,112 @@ infer_infix_expr_type(Expr, Operation, Variables) ->
 	[Sub_expr1, Sub_expr2] = get_children(Expr),
 	Expr_inf1 = infer_expr_inf(Sub_expr1, Variables),
 	Expr_inf2 = infer_expr_inf(Sub_expr2, Variables),
-	%erlang:display(Expr_inf1),
 %Добавить проверку на правильность типа	
 	compute_infix_expr(Expr_inf1, Expr_inf2, Operation).
 
-compute_infix_expr({float, [Val1]}, {Type, [Val2]}, '+') when (Type == integer) or (Type == float) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) ->
-	{float, Val1 + Val2};
-compute_infix_expr({Type, [Val1]}, {float, [Val2]}, '+') when (Type == integer) or (Type == float) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) ->
-	{float, Val1 + Val2};
-compute_infix_expr({Type1, [Val1]}, {Type2, [Val2]}, '+') when ((Type1 == integer) or (Type1 == non_neg_integer) or (Type1 == pos_integer) or (Type1 == neg_integer)) and
+infer_prefix_expr_type(Expr, Operation, Variables) ->
+	[Sub_expr] = ?Query:exec(Expr, ?Expr:children()),
+	Sub_expr_inf = infer_expr_inf(Sub_expr, Variables),
+	compute_prefix_expr(Sub_expr_inf, Operation).
+
+compute_prefix_expr({Type, [Value]}, '-') when (Type == integer) or (Type == float) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) ->
+	{Type, [-Value]};
+compute_prefix_expr({Type, []}, '-') when (Type == integer) or (Type == float) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) or (Type == number) or (Type == any) ->
+	{Type, []};
+
+compute_prefix_expr({Type, [Value]}, 'bnot') when (Type == integer) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) ->
+	if
+		Value < 0 -> {Type, [bnot (Value)]};
+		true         -> {Type, [bnot (Value)]}
+	end;
+compute_prefix_expr({Type, []}, 'bnot') when (Type == integer) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) or (Type == number) or (Type == any) ->
+	{Type, []};
+
+compute_prefix_expr({_Type, _Value}, _Operation) ->
+	{none, []}.
+
+
+compute_infix_expr({float, [Value1]}, {Type, [Value2]}, '+') when (Type == integer) or (Type == float) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) or (Type == any) ->
+	{float, [Value1 + Value2]};
+compute_infix_expr({Type, [Value1]}, {float, [Value2]}, '+') when (Type == integer) or (Type == float) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) or (Type == any) ->
+	{float, [Value1 + Value2]};
+compute_infix_expr({Type1, [Value1]}, {Type2, [Value2]}, '+') when ((Type1 == integer) or (Type1 == non_neg_integer) or (Type1 == pos_integer) or (Type1 == neg_integer)) and
+														       ((Type2 == integer) or (Type2 == non_neg_integer) or (Type2 == pos_integer) or (Type2 == neg_integer) or (Type2 == any)) ->
+	{integer, [Value1 + Value2]};
+compute_infix_expr({Type1, [Value1]}, {Type2, [Value2]}, '+') when ((Type1 == integer) or (Type1 == non_neg_integer) or (Type1 == pos_integer) or (Type1 == neg_integer) or (Type2 == any))  and
 														       ((Type2 == integer) or (Type2 == non_neg_integer) or (Type2 == pos_integer) or (Type2 == neg_integer)) ->
-	{integer, Val1 + Val2};
-
-compute_infix_expr({float, [Val1]}, {Type, [Val2]}, '-') when (Type == integer) or (Type == float) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) ->
-	{float, Val1 - Val2};
-compute_infix_expr({Type, [Val1]}, {float, [Val2]}, '-') when (Type == integer) or (Type == float) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) ->
-	{float, Val1 - Val2};
-compute_infix_expr({Type, [Val1]}, {Type, [Val2]}, '-') when (Type == integer) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) ->
-	{float, Val1 - Val2};
-
-compute_infix_expr({float, [Val1]}, {Type, [Val2]}, '*') when (Type == integer) or (Type == float) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) ->
-	{float, Val1 * Val2};
-compute_infix_expr({Type, [Val1]}, {float, [Val2]}, '*') when (Type == integer) or (Type == float) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) ->
-	{float, Val1 * Val2};
-compute_infix_expr({Type, [Val1]}, {Type, [Val2]}, '*') when (Type == integer) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) ->
-	{float, Val1 * Val2};
-
-compute_infix_expr({Type, [Val1]}, {Type, [Val2]}, '/') when (Type == integer) or (Type == float) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) ->
-	{float, Val1 / Val2};
+	{integer, [Value1 + Value2]};
+compute_infix_expr({any, _Value1}, {any, _Value2}, '+') ->
+	{number, []};
 
 
-compute_infix_expr({float, []}, {Type, Val2}, _Operation) when (Type == integer) or (Type == float) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) or (Type == number) or (Type == any) ->
-	{float, undefinied};
-compute_infix_expr({Type, Val1}, {float, []}, _Operation) when (Type == integer) or (Type == float) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) or (Type == number) or (Type == any) ->
-	{float, undefined};
-compute_infix_expr({number, []}, {Type, Val2}, _Operation) when (Type == integer) or (Type == number) ->
-	{number, undefinied};
-compute_infix_expr({Type, Val1}, {number, []}, _Operation) when (Type == integer) or (Type == number) ->
-	{number, undefined};
-compute_infix_expr({integer, []}, {integer, Val}, _Operation) ->
-	{integer, undefined};
-compute_infix_expr({integer, Val}, {integer, []}, _Operation) ->
-	{integer, undefined};
-compute_infix_expr(A, B, _Operation) ->
-	erlang:display({A, B}).
+compute_infix_expr({float, [Value1]}, {Type, [Value2]}, '-') when (Type == integer) or (Type == float) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) or (Type == any) ->
+	{float, [Value1 - Value2]};
+compute_infix_expr({Type, [Value1]}, {float, [Value2]}, '-') when (Type == integer) or (Type == float) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) or (Type == any) ->
+	{float, [Value1 - Value2]};
+compute_infix_expr({Type1, [Value1]}, {Type2, [Value2]}, '-') when ((Type1 == integer) or (Type1 == non_neg_integer) or (Type1 == pos_integer) or (Type1 == neg_integer)) and
+														       ((Type2 == integer) or (Type2 == non_neg_integer) or (Type2 == pos_integer) or (Type2 == neg_integer) or (Type2 == any)) ->
+	{integer, [Value1 - Value2]};
+compute_infix_expr({Type1, [Value1]}, {Type2, [Value2]}, '-') when ((Type1 == integer) or (Type1 == non_neg_integer) or (Type1 == pos_integer) or (Type1 == neg_integer) or (Type2 == any))  and
+														       ((Type2 == integer) or (Type2 == non_neg_integer) or (Type2 == pos_integer) or (Type2 == neg_integer)) ->
+	{integer, [Value1 - Value2]};
+compute_infix_expr({any, _Value1}, {any, _Value2}, _Operation) ->
+	{number, []};
+
+
+compute_infix_expr({float, [Value1]}, {Type, [Value2]}, '*') when (Type == integer) or (Type == float) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) or (Type == any) ->
+	{float, [Value1 * Value2]};
+compute_infix_expr({Type, [Value1]}, {float, [Value2]}, '*') when (Type == integer) or (Type == float) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) or (Type == any) ->
+	{float, [Value1 * Value2]};
+compute_infix_expr({Type1, [Value1]}, {Type2, [Value2]}, '*') when ((Type1 == integer) or (Type1 == non_neg_integer) or (Type1 == pos_integer) or (Type1 == neg_integer)) and
+														       ((Type2 == integer) or (Type2 == non_neg_integer) or (Type2 == pos_integer) or (Type2 == neg_integer) or (Type2 == any)) ->
+	{integer, [Value1 * Value2]};
+compute_infix_expr({Type1, [Value1]}, {Type2, [Value2]}, '*') when ((Type1 == integer) or (Type1 == non_neg_integer) or (Type1 == pos_integer) or (Type1 == neg_integer) or (Type2 == any))  and
+														       ((Type2 == integer) or (Type2 == non_neg_integer) or (Type2 == pos_integer) or (Type2 == neg_integer)) ->
+	{integer, [Value1 * Value2]};
+
+
+compute_infix_expr(_Expr1, {_Type2, [0]}, '/') -> 
+	{none, []};	
+compute_infix_expr({Type1, [Value1]}, {Type2, [Value2]}, '/') when ((Type1 == integer) or (Type1 == float) or (Type1 == non_neg_integer) or (Type1 == pos_integer) or (Type1 == neg_integer)) and
+															       ((Type2 == integer) or (Type2 == float) or (Type2 == non_neg_integer) or (Type2 == pos_integer) or (Type2 == neg_integer))
+	-> {float, [Value1 / Value2]};
+compute_infix_expr({Type1, _Value1}, {Type2, _Value2}, '/') when ((Type1 == number) or (Type1 == integer) or (Type1 == float) or (Type1 == non_neg_integer) or (Type1 == pos_integer) or (Type1 == neg_integer) or (Type1 == any)) and
+													   ((Type2 == number) or (Type2 == integer) or (Type2 == float) or (Type2 == non_neg_integer) or (Type2 == pos_integer) or (Type2 == neg_integer) or (Type1 == any))
+	-> {float, []};
+
+compute_infix_expr(_Expr1, {_Type2, [0]}, 'div') ->
+	{none, []};
+compute_infix_expr({Type1, [Value1]}, {Type2, [Value2]}, 'div') when ((Type1 == integer) or (Type1 == non_neg_integer) or (Type1 == pos_integer) or (Type1 == neg_integer)) and
+															         ((Type2 == integer) or (Type2 == float) or (Type2 == non_neg_integer) or (Type2 == pos_integer) or (Type2 == neg_integer))
+	-> {integer, [Value1 div Value2]};
+compute_infix_expr({Type1, _Value1}, {Type2, _Value2}, 'div') when ((Type1 == integer) or (Type1 == non_neg_integer) or (Type1 == pos_integer) or (Type1 == neg_integer)) and
+															         ((Type2 == integer) or (Type2 == float) or (Type2 == non_neg_integer) or (Type2 == pos_integer) or (Type2 == neg_integer))
+	-> {integer, []};
+
+
+compute_infix_expr({float, _Value1}, {Type, _Value2}, _Operation) when ((Type == integer) or (Type == float) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) or (Type == number) or (Type == any))																	
+	-> {float, []};
+compute_infix_expr({Type, _Value1}, {float, _Value2}, _Operation) when ((Type == integer) or (Type == float) or (Type == non_neg_integer) or (Type == pos_integer) or (Type == neg_integer) or (Type == number) or (Type == any))
+	-> {float, []};
+
+
+compute_infix_expr({Type1, _Value1}, {Type2, _Value2}, _Operation) when  ((Type1 == any) or (Type1 == number)) and 
+														                ((Type2 == number) or (Type2 == integer) or (Type2 == float) or (Type2 == non_neg_integer) or (Type2 == pos_integer) or (Type2 == neg_integer) or (Type2 == any)) 
+	-> {number, []};
+compute_infix_expr({Type1, _Value1}, {Type2, _Value2}, _Operation) when  ((Type2 == any) or (Type2 == number)) and
+														                ((Type1 == number) or (Type1 == integer) or (Type1 == float) or (Type1 == non_neg_integer) or (Type1 == pos_integer) or (Type1 == neg_integer) or (Type1 == any))
+	-> {number, []};	
+
+
+compute_infix_expr({integer, _Value1}, {Type2, _Value2}, _Operation) when ((Type2 == integer) or (Type2 == non_neg_integer) or (Type2 == pos_integer) or (Type2 == neg_integer)) ->
+	{integer, []};
+compute_infix_expr({Type1, _Value1}, {integer, _Value2}, _Operation) when ((Type1 == integer) or (Type1 == non_neg_integer) or (Type1 == pos_integer) or (Type1 == neg_integer)) ->
+	{integer, []};
+
+
+compute_infix_expr(_A, _B, _Operation) ->
+	{none, []}.
 
 %---------------------------------Helper functions---------------------------------------------
 get_path(Mod_name) ->
@@ -194,7 +256,7 @@ compare_elems([Pat | Pats], [Par | Pars]) ->
 	Param_type = ?Expr:type(Par),
 	Pat_type = ?Expr:type(Pat),
 
-	Res = case {Param_type, Pat_type} of
+	case {Param_type, Pat_type} of
 		{cons, cons}     -> case compare_cons(Pat, Par) of
 						   		true     -> [true | compare_elems(Pats, Pars)];
 						   		possibly -> [possibly | compare_elems(Pats, Pars)];
@@ -231,9 +293,9 @@ compare_cons(Con1, Con2) ->
 
 conclude([], Status) ->
 	Status;
-conclude([false | T], _) ->
+conclude([false | _T], _) ->
 	false; 
-conclude([possibly | T], Status) ->
+conclude([possibly | T], _Status) ->
 	conclude(T, possibly);
 conclude([true | T], possibly) ->
 	conclude(T, possibly);
