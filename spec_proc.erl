@@ -171,7 +171,11 @@ get_literal_type(Elem) ->
 		negate -> [Child] = ?Query:exec(Elem, ?Typexp:children()),
 			      {Type, Value} = get_spec_elem_type(Child),
 			      {Type, [-Value]};
-		_      -> {?Typexp:type(Elem), [?Typexp:tag(Elem)]}
+		_      -> case ?Typexp:tag(Elem) of
+                    true  -> {boolean, [?Typexp:tag(Elem)]};
+                    false -> {boolean, [?Typexp:tag(Elem)]};
+                    _     -> {?Typexp:type(Elem), [?Typexp:tag(Elem)]}
+                  end
 	end.
 
 get_union_type(Arg) ->
@@ -232,11 +236,11 @@ get_funcs_sig2([Spec | Specs], [T | Ts]) ->
 f() ->
     [
         %keyfind
-        {[{"Key",{term,[]}},{"N",{pos_integer,[]}},{"TupleList",{list,[{tuple,[]}]}}],[{union,[{tuple,[]},{atom,[false]}]}]},
+        {[{"Key",{term,[]}},{"N",{pos_integer,[]}},{"TupleList",{list,[{tuple,[]}]}}],[{union,[{tuple,[]},{boolean,[false]}]}]},
         %keymember
         {[{"Key",{term,[]}},{"N",{pos_integer,[]}},{"TupleList",{list,[{tuple,[]}]}}],[{boolean,[]}]},
         %keysearch
-        {[{"Key",{term,[]}},{"N",{pos_integer,[]}},{"TupleList",{list,[{tuple,[]}]}}],[{union,[{tuple,[{atom,[value]},{tuple,[]}]},{atom,[false]}]}]},
+        {[{"Key",{term,[]}},{"N",{pos_integer,[]}},{"TupleList",{list,[{tuple,[]}]}}],[{union,[{tuple,[{atom,[value]},{tuple,[]}]},{boolean,[false]}]}]},
         %member
         {[{"Elem",{term,[]}},{"List",{list,[{term,[]}]}}],[{boolean,[]}]},
         %reverse
@@ -316,7 +320,7 @@ f() ->
         %keyreplace
         {[{"Key",{term,[]}},{"N",{pos_integer,[]}},{"TupleList1",{list,[{tuple,[]}]}},{"NewTuple",{tuple,[]}}],[{"TupleList2",{list,[{tuple,[]}]}}]},
         %keytake
-        {[{"Key",{term,[]}},{"N",{pos_integer,[]}},{"TupleList1",{list,[{tuple,[]}]}}],[{union,[{tuple,[{atom,[value]},{tuple,[]},{list,[{tuple,[]}]}]},{atom,[false]}]}]},
+        {[{"Key",{term,[]}},{"N",{pos_integer,[]}},{"TupleList1",{list,[{tuple,[]}]}}],[{union,[{tuple,[{atom,[value]},{tuple,[]},{list,[{tuple,[]}]}]},{boolean,[false]}]}]},
         %keystore
         {[{"Key",{term,[]}},{"N",{pos_integer,[]}},{"TupleList1",{list,[{tuple,[]}]}},{"NewTuple",{tuple,[]}}],[{"TupleList2",{list,[{tuple,[]},'...']}}]},
         %keysort
@@ -374,9 +378,9 @@ f() ->
         %partition
         {[{"Pred",{func,[[{term,[]}],[{boolean,[]}]]}},{"List",{list,[{term,[]}]}}],[{tuple,[{list,[{term,[]}]},{list,[{term,[]}]}]}]},
         %filtermap
-        {[{"Fun",{func,[[{term,[]}],[{union,[{boolean,[]},{tuple,[{atom,[true]},{term,[]}]}]}]]}},{"List1",{list,[{term,[]}]}}],[{"List2",{list,[{union,[{term,[]},{term,[]}]}]}}]},
+        {[{"Fun",{func,[[{term,[]}],[{union,[{boolean,[]},{tuple,[{boolean,[true]},{term,[]}]}]}]]}},{"List1",{list,[{term,[]}]}}],[{"List2",{list,[{union,[{term,[]},{term,[]}]}]}}]},
         %zf
-        {[{func,[[{variable,["T"]}],[{union,[{boolean,[]},{tuple,[{atom,[true]},{variable,["X"]}]}]}]]},{list,[{variable,["T"]}]}],[{list,[{paren,[{union,[{variable,["T"]},{variable,["X"]}]}]}]}]},
+        {[{func,[[{variable,["T"]}],[{union,[{boolean,[]},{tuple,[{boolean,[true]},{variable,["X"]}]}]}]]},{list,[{variable,["T"]}]}],[{list,[{paren,[{union,[{variable,["T"]},{variable,["X"]}]}]}]}]},
         %foreach
         {[{"Fun",{func,[[{term,[]}],[{term,[]}]]}},{"List",{list,[{term,[]}]}}],[{atom,[ok]}]},
         %mapfoldl
