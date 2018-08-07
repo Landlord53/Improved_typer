@@ -333,8 +333,8 @@ compare_tuples(_T1, _T2) ->
 compare_cons(Con1, Con2) ->
 	Children1 = construct_list_from_cons_expr(Con1),
 	Children2 = construct_list_from_cons_expr(Con2),
-	%erlang:display(Children1),
-	%erlang:display(Children2),
+	erlang:display(Children1),
+	erlang:display(Children2),
 	Res = compare_lists_elems(Children1, Children2),
 	conclude(Res, true).
 
@@ -375,26 +375,55 @@ compare_lists_elems([H1 | T1], [H2 | T2]) ->
 		false -> [false]
 	end.
 
-construct_list_from_cons_expr(Cons) ->
-	Children = ?Query:exec(Cons, ?Expr:children()),
-	lists:flatten(extract_expr_vals(Children)).
-
 extract_expr_vals([]) -> [];
+extract_expr_vals([{list, List}, {cons, Cons}]) ->
+	A = construct_list_from_list_expr(List),
+	B = construct_list_from_cons_expr(Cons),
+	%erlang:display({A, B}),
+
+	case B of
+		empty_list    -> A;
+		{variable, _} -> A ++ ['...'];
+		_             -> A ++ B
+	end;
 extract_expr_vals([H | T]) ->
-	case ?Expr:type(H) of
-		list     -> [constract_list_from_list_expr(H) | extract_expr_vals(T)];
-		cons     -> [construct_list_from_cons_expr(H) | extract_expr_vals(T)];
-		variable -> case T of
-						[] -> ['...' | extract_expr_vals(T)];
-						_  -> [H | extract_expr_vals(T)]
-				    end;
-		_        -> [?Expr:value(H) | extract_expr_vals(T)] 
+	case ?Expr:type(H) of 
+		cons -> [construct_list_from_cons_expr(H)];
+		list -> construct_list_from_list_expr(H);
+		variable -> [{variable, [?Expr:value(H)]} | extract_expr_vals(T)];
+		_        -> [?Expr:value(H) | extract_expr_vals(T)] 		
+	end;
+extract_expr_vals(Cons_child) ->
+	case ?Expr:type(Cons_child) of 
+		cons -> empty_list;
+		list -> construct_list_from_list_expr(Cons_child);
+		variable -> {variable, [?Expr:value(Cons_child)]};
+		_        -> ?Expr:value(Cons_child)		
 	end.
 
-constract_list_from_list_expr([]) -> [];
-constract_list_from_list_expr(L) ->
+construct_list_from_cons_expr(Cons) ->
+	Children = ?Query:exec(Cons, ?Expr:children()),
+
+	A = 
+	case length(Children) of
+		0 -> extract_expr_vals(Cons);
+		1 -> B = extract_expr_vals(Children),
+			 %erlang:display(B),
+			 B;
+		2 -> [List_expr, Cons_expr] = Children,
+			 %erlang:display(Cons_expr),
+			 extract_expr_vals([{list, List_expr}, {cons, Cons_expr}])
+	end,
+
+	%erlang:display(A),
+	A.
+
+construct_list_from_list_expr([]) -> [];
+construct_list_from_list_expr(L) ->
 	Children = ?Query:exec(L, ?Expr:children()),
-	extract_expr_vals(Children).
+	A = extract_expr_vals(Children),
+	%erlang:display({list, A}),
+	A.
 
 compare_simple_type(Pat, Par) ->
 	?Expr:value(Pat) =:= ?Expr:value(Par).
