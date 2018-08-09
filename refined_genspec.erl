@@ -287,109 +287,101 @@ get_actual_params(Application) ->
 %----------------------------------Defining actual clauses-------------------------------------
 find_actual_clause([], _) -> [];
 find_actual_clause([Pat | Pats], Pars) ->
-	Res = compare_expressions(Pat, Pars),
+	Res = compare_terms(Pat, Pars),
 	case Res of 
 		true  -> [?Query:exec(hd(Pat), ?Expr:clause())];
 		possibly -> [?Query:exec(hd(Pat), ?Expr:clause()) | find_actual_clause(Pats, Pars)];
 		false -> find_actual_clause(Pats, Pars)
 	end.	
 
-compare_expressions(Pats, Pars) ->
-	Res = compare_elems(Pats, Pars),
-	conclude(Res, true).
-
-compare_elems([], []) -> [];
-compare_elems([Pat | Pats], [Par | Pars]) ->
+compare_terms([], []) -> true;
+compare_terms([Pat | Pats], [Par | Pars]) ->
 	Param_type = ?Expr:type(Par),
 	Pat_type = ?Expr:type(Pat),
 
+	A = 
 	case {Param_type, Pat_type} of
 		{cons, cons}     -> case compare_cons(Pat, Par) of
-						   		true     -> [true | compare_elems(Pats, Pars)];
-						   		possibly -> [possibly | compare_elems(Pats, Pars)];
-								false -> [false]
+						   		true  -> compare_terms(Pats, Pars);
+								false -> false
 							end;
 		{tuple, tuple} -> case compare_tuples(Pat, Par) of
-						   		true -> [true | compare_elems(Pats, Pars)];
-						   		possibly -> [possibly | compare_elems(Pats,Pars)];
-								false -> [false]
+						   		true  -> compare_terms(Pats, Pars);
+								false -> false
 							end;
-		{_, variable}    -> [possibly | compare_elems(Pats, Pars)];
-		{variable, _}    -> [possibly | compare_elems(Pats, Pars)];
+		{_, variable}    -> true;
+		{variable, _}    -> true;
 		_                -> case compare_simple_type(Pat, Par) of
-								true  -> [true | compare_elems(Pats, Pars)];
-								false -> [false]
+								true  -> compare_terms(Pats, Pars);
+								false -> false
 							end
-	end.
+	end,
+	erlang:display(A),
+	A.
 
-compare_tuples(T1, T2) when length(T1) == length(T2) ->
+compare_tuples(T1, T2) ->
 	Children1 = ?Query:exec(T1, ?Expr:children()),
 	Children2 = ?Query:exec(T2, ?Expr:children()),
 
-	compare_expressions(Children1, Children2);
-compare_tuples(_T1, _T2) ->
-	false.
+	if
+		length(Children1) == length(Children2) -> compare_terms(Children1, Children2);
+		true                                   -> false
+	end.
 
 compare_cons(Con1, Con2) ->
 	Children1 = construct_list_from_cons_expr(Con1),
 	Children2 = construct_list_from_cons_expr(Con2),
 	erlang:display(Children1),
 	erlang:display(Children2),
-	Res = compare_lists_elems(Children1, Children2),
-	conclude(Res, true).
+	compare_lists_elems(Children1, Children2).
 
-conclude([], Status) ->
-	Status;
-conclude([false | _T], _) ->
-	false; 
-conclude([possibly | T], _Status) ->
-	conclude(T, possibly);
-conclude([true | T], possibly) ->
-	conclude(T, possibly);
-conclude([H | T], _) ->
-	conclude(T, H).
+compare_simple_type(Pat, Par) ->
+	?Expr:value(Pat) =:= ?Expr:value(Par).
 
-compare_lists_elems([], []) ->
-	[true];
-compare_lists_elems([any  | T1], [_H2 | T2]) ->
-	[possibly | compare_lists_elems(T1, T2)];
-compare_lists_elems([_H1  | T1], [any | T2]) ->
-	[possibly | compare_lists_elems(T1, T2)];
-compare_lists_elems([], ['...'])  ->
-	[possibly];
-compare_lists_elems(['...'], [])  ->
-	[possibly];
-compare_lists_elems(['...'], ['...'])  ->
-	[possibly];
-compare_lists_elems(_, [])  ->
-	[false];
-compare_lists_elems([], 	_)  ->
-	[false];
+compare_lists_elems(L, L) -> true;
+compare_lists_elems(empty_list, _)  ->
+	false;
+compare_lists_elems(_, empty_list)  ->
+	false;
 compare_lists_elems(['...'], _) ->
-	[possibly];
+	true;
 compare_lists_elems(_, ['...']) ->
-	[possibly];
+	true;
+compare_lists_elems([], L2) ->
+	false;
+compare_lists_elems(L1, []) ->
+	false;
+compare_lists_elems([{variable, _} | T1], [_ | T2]) ->
+	compare_lists_elems(T1, T2);
+compare_lists_elems([_ | T1], [{variable, _} | T2]) ->
+	compare_lists_elems(T1, T2);
+compare_lists_elems([H1 | T1], [H2 | T2]) when erlang:is_list(H1) and erlang:is_list(H2) ->
+	compare_lists_elems(H1, H2) and compare_terms(T1, T2);
+compare_lists_elems([H1 | T1], [H2 | T2]) when erlang:is_tuple(H1) and erlang:is_tuple(H2) ->
+	Tuple1 = erlang:tuple_to_list(H1),
+	Tuple2 = erlang:tuple_to_list(H2),
+	compare_lists_elems(Tuple1, Tuple2) and compare_lists_elems(T1, T2);
 compare_lists_elems([H1 | T1], [H2 | T2]) ->
 	case H1 == H2 of
-		true -> [true | compare_lists_elems(T1, T2)];
-		false -> [false]
+		true -> compare_lists_elems(T1, T2);
+		false -> false
 	end.
 
 extract_expr_vals([]) -> [];
-extract_expr_vals([{list, List}, {cons, Cons}]) ->
-	A = construct_list_from_list_expr(List),
-	B = construct_list_from_cons_expr(Cons),
-	%erlang:display({A, B}),
+extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}]) ->
+	Left_cons_expr_list = construct_list_from_expr(Left_cons_expr),
+	Right_cons_expr_list = construct_list_from_expr(Right_cons_expr),
 
-	case B of
-		empty_list    -> A;
-		{variable, _} -> A ++ ['...'];
-		_             -> A ++ B
+	case Right_cons_expr_list of
+		empty_list    -> Left_cons_expr_list;
+		{variable, _} -> Left_cons_expr_list ++ ['...'];
+		_             -> Left_cons_expr_list ++ Right_cons_expr_list
 	end;
 extract_expr_vals([H | T]) ->
 	case ?Expr:type(H) of 
 		cons -> [construct_list_from_cons_expr(H)];
 		list -> construct_list_from_list_expr(H);
+		tuple -> [construct_tuple(H) | extract_expr_vals(T)];
 		variable -> [{variable, [?Expr:value(H)]} | extract_expr_vals(T)];
 		_        -> [?Expr:value(H) | extract_expr_vals(T)] 		
 	end;
@@ -397,36 +389,39 @@ extract_expr_vals(Cons_child) ->
 	case ?Expr:type(Cons_child) of 
 		cons -> empty_list;
 		list -> construct_list_from_list_expr(Cons_child);
+		tuple -> construct_tuple(Cons_child);
 		variable -> {variable, [?Expr:value(Cons_child)]};
 		_        -> ?Expr:value(Cons_child)		
 	end.
 
+construct_list_from_expr(Expr) ->
+	case ?Expr:type(Expr) of
+		cons     -> construct_list_from_cons_expr(Expr);
+		list     -> construct_list_from_list_expr(Expr);
+		tuple    -> construct_tuple(Expr);
+		variable -> {variable, [?Expr:value(Expr)]};
+		_        -> ?Expr:value(Expr)	
+	end.
+
+construct_tuple([]) -> [];
+construct_tuple(Tuple) ->
+	Children = ?Query:exec(Tuple, ?Expr:children()),
+	Vals = extract_expr_vals(Children).
+
 construct_list_from_cons_expr(Cons) ->
 	Children = ?Query:exec(Cons, ?Expr:children()),
 
-	A = 
 	case length(Children) of
 		0 -> extract_expr_vals(Cons);
-		1 -> B = extract_expr_vals(Children),
-			 %erlang:display(B),
-			 B;
-		2 -> [List_expr, Cons_expr] = Children,
-			 %erlang:display(Cons_expr),
-			 extract_expr_vals([{list, List_expr}, {cons, Cons_expr}])
-	end,
-
-	%erlang:display(A),
-	A.
+		1 -> extract_expr_vals(Children);
+		2 -> [Left_cons_expr, Right_cons_expr] = Children,
+			 extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}])
+	end.
 
 construct_list_from_list_expr([]) -> [];
 construct_list_from_list_expr(L) ->
 	Children = ?Query:exec(L, ?Expr:children()),
-	A = extract_expr_vals(Children),
-	%erlang:display({list, A}),
-	A.
-
-compare_simple_type(Pat, Par) ->
-	?Expr:value(Pat) =:= ?Expr:value(Par).
+	extract_expr_vals(Children).
 
 %--------------------Extraction of a function specification from the typer result--------------------------------------
 extract_matches([]) -> [];
