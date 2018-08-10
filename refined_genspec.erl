@@ -11,15 +11,15 @@
 
 -compile(export_all).
 
-test_expr_inference(Mod_name, Fun_name, Arity) ->
+infer_fun_type(Mod_name, Fun_name, Arity, Variables) ->
 	Fun_node = get_fun_node(Mod_name, Fun_name, Arity),
 	Fun_def = get_fundef(Fun_node),
 	Clauses = get_clauses(Fun_def),
-	lists:map(fun(Clause) -> get_clause_type(Clause) end, Clauses).
+	lists:map(fun(Clause) -> get_clause_type(Clause, Variables) end, Clauses).
 
-get_clause_type(Clause) ->
+get_clause_type(Clause, Variables) ->
 	Bodies = get_bodies(Clause),
-	define_bodies_type(Bodies, []).
+	define_bodies_type(Bodies, Variables).
 
 define_bodies_type([], _) -> [];
 define_bodies_type([Last_body], Variables) ->
@@ -28,10 +28,10 @@ define_bodies_type([Body | Bodies], Variables) ->
 	Body_type = infer_expr_inf(Body, Variables),
 	%erlang:display(Body_type),
 
-		case Body_type of
-			{_Var_name, {_Type, _Value}} -> define_bodies_type(Bodies, [Body_type | Variables]);
-			_                         -> define_bodies_type(Bodies, Variables)
-		end.
+	case Body_type of
+		{_Var_name, {_Type, _Value}} -> define_bodies_type(Bodies, [Body_type | Variables]);
+		_                         -> define_bodies_type(Bodies, Variables)
+	end.
 
 
 test_finding_actual_clauses(Mod_name, Fun_name, Arity) ->
@@ -78,18 +78,34 @@ infer_simple_type(Expr) ->
 
 infer_fun_app_type(Fun_app) ->
 	[Expr, Arglist] = ?Query:exec(Fun_app, ?Expr:children()),
-	[Module, Fun] = 
-		case ?Expr:value(Expr) of
-			':' -> ?Query:exec(Expr, ?Expr:children());
-			_   -> [4, 5]
-		end,
+	Function = ?Query:exec(Fun_app, ?Expr:function()),
+	[Fun_mod] = ?Query:exec(Function, ?Fun:module()),
+	erlang:display(Fun_mod),
 
-	Args = ?Query:exec(Arglist, ?Expr:children()),
+	case ?Expr:value(Expr) of
+		':' -> infer_external_fun(Expr, Arglist);
+		_   -> infer_internal_fun(?Mod:name(Fun_mod), ?Expr:value(Expr), Arglist)
+	end.
+
+infer_external_fun(Colon_op, Arg_list_expr) ->
+	[Module, Fun] = ?Query:exec(Colon_op, ?Expr:children()),
+	Arg_list = ?Query:exec(Arg_list_expr, ?Expr:children()),
+	Args = ?Query:exec(Arg_list, ?Expr:children()),
 	Arity = length(Args),
-	Module_name = ?Expr:value(Module),
+	Mod_name = ?Expr:value(Module),
 	Fun_name = ?Expr:value(Fun),
-	{_, [Return_type]} = spec_proc:get_spec_type(Module_name, Fun_name, Arity),
+	{_, [Return_type]} = spec_proc:get_spec_type(Mod_name, Fun_name, Arity),
 	Return_type.
+
+infer_internal_fun(Mod_name, Fun_name, Arg_list_expr) ->
+	Arg_list = ?Query:exec(Arg_list_expr, ?Expr:children()),
+	Temp = lists:map(fun(Expr) -> refanal_dataflow:reach_1st([Expr], [{safe, true}], true) end, Arg_list),
+	erlang:display(Temp),
+
+	Arity = length(Arg_list),
+	[A] = infer_fun_type(Mod_name, Fun_name, Arity, []),
+	erlang:display(A),
+	A.
 
 infer_parenthesis_inf(Expr, Variables) ->
 	[Child] = get_children(Expr),
