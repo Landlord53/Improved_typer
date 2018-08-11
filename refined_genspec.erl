@@ -34,12 +34,8 @@ define_bodies_type([Body | Bodies], Variables) ->
 	end.
 
 
-test_finding_actual_clauses(Mod_name, Fun_name, Arity) ->
+find_actual_clauses(Mod_name, Fun_name, Arity, Actual_params) ->
 	Fun_node = get_fun_node(Mod_name, Fun_name, Arity),
-	Applications = get_applications(Fun_node),
-	Application  = hd(Applications), %--------------------------------for testing
-	Actual_params = get_actual_params(Application),
-	%[?Expr:type(Actual_param) || Actual_param <- Actual_params]. %--------------------------------for testing
 	Fun_def = get_fundef(Fun_node),
 	Clauses = get_clauses(Fun_def),
 	Patterns = [get_patterns(Clause) || Clause <- Clauses],
@@ -80,7 +76,6 @@ infer_fun_app_type(Fun_app) ->
 	[Expr, Arglist] = ?Query:exec(Fun_app, ?Expr:children()),
 	Function = ?Query:exec(Fun_app, ?Expr:function()),
 	[Fun_mod] = ?Query:exec(Function, ?Fun:module()),
-	erlang:display(Fun_mod),
 
 	case ?Expr:value(Expr) of
 		':' -> infer_external_fun(Expr, Arglist);
@@ -99,13 +94,40 @@ infer_external_fun(Colon_op, Arg_list_expr) ->
 
 infer_internal_fun(Mod_name, Fun_name, Arg_list_expr) ->
 	Arg_list = ?Query:exec(Arg_list_expr, ?Expr:children()),
-	Temp = lists:map(fun(Expr) -> refanal_dataflow:reach_1st([Expr], [{safe, true}], true) end, Arg_list),
-	erlang:display(Temp),
-
+	%erlang:display(Arg_list),
 	Arity = length(Arg_list),
-	[A] = infer_fun_type(Mod_name, Fun_name, Arity, []),
+	Actual_clauses = find_actual_clauses(Mod_name, Fun_name, Arity, Arg_list),
+	%erlang:display(Arg_list),
+	Actual_params = lists:map(fun(Expr) -> refanal_dataflow:reach_1st([Expr], [{safe, true}], true) end, Arg_list),
+	obtain_correspondent_patterns(Actual_params),
+	%erlang:display(Actual_params),
+	Variables = replace_params_with_args_val(Actual_params, Arg_list),
+	Fun_type = lists:map(fun(Clause) -> get_clause_type(Clause, Variables) end, Actual_clauses),
+
+	A = 
+	case length(Fun_type) of
+		1 -> hd(Fun_type);
+		_ -> {union, lists:flatten(Fun_type)}
+	end,
+
 	erlang:display(A),
 	A.
+
+obtain_correspondent_patterns([]) -> [];
+obtain_correspondent_patterns([Par | Pars]) -> 
+	
+	
+
+replace_params_with_args_val([], []) -> [];
+replace_params_with_args_val([Par | Pars], [Arg | Args]) ->
+	case ?Expr:type(Par) of
+		variable -> case ?Expr:type(Arg) of
+						variable -> replace_params_with_args_val(Pars, Args);
+						_        -> [{?Expr:value(Par), infer_expr_inf(Arg, [])} | replace_params_with_args_val(Pars, Args)]
+					end;
+		_        -> replace_params_with_args_val(Pars, Args)
+	end.
+
 
 infer_parenthesis_inf(Expr, Variables) ->
 	[Child] = get_children(Expr),
@@ -120,6 +142,7 @@ infer_infix_expr_type(Expr, Operation, Variables) ->
 	[Sub_expr1, Sub_expr2] = get_children(Expr),
 	Expr_inf1 = infer_expr_inf(Sub_expr1, Variables),
 	Expr_inf2 = infer_expr_inf(Sub_expr2, Variables),
+	erlang:display({Expr_inf1, Expr_inf2}),
 %Добавить проверку на правильность типа	
 	compute_infix_expr(Expr_inf1, Expr_inf2, Operation).
 
