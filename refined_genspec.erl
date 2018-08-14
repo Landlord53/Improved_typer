@@ -6,6 +6,8 @@
 %3)Добавить проверку, что если паттерн абсолютно совпадает с actual parameters, не проверять дальше.
 %4)Функция get_fun_name не обрабатывает случай, когда можду именем функции и скобками есть пробелы.
 %5)Добавить ":" d infix expressions.
+%6)Добавить обработку случая, когда нет actual clauses для функции infer_internal_fun.
+
 -include("user.hrl").
 -include("spec.hrl").
 
@@ -18,8 +20,13 @@ infer_fun_type(Mod_name, Fun_name, Arity, Variables) ->
 	lists:map(fun(Clause) -> get_clause_type(Clause, Variables) end, Clauses).
 
 get_clause_type(Clause, Variables) ->
+	%erlang:display({Clause, Variables}),
 	Bodies = get_bodies(Clause),
 	define_bodies_type(Bodies, Variables).
+
+get_clauses_type([], []) -> [];
+get_clauses_type([Clause | Clauses], [Clause_variables | All_variables]) ->
+	[get_clause_type(Clause, Clause_variables) | get_clauses_type(Clauses, All_variables)].
 
 define_bodies_type([], _) -> [];
 define_bodies_type([Last_body], Variables) ->
@@ -45,7 +52,6 @@ find_actual_clauses(Mod_name, Fun_name, Arity, Actual_params) ->
 				get_clauses(Fun_def);
 		_  ->   find_actual_clause(Patterns, Actual_params)   
 	end.
-%	lists:map(fun(Clause) -> get_clause_type(Clause) end, Actual_clause).
 
 %---------------------------------Inference part-----------------------------------------------
 
@@ -54,8 +60,7 @@ infer_expr_inf(Expr, Variables) ->
 		prefix_expr -> infer_prefix_expr_type(Expr, ?Expr:value(Expr), Variables);
 		match_expr -> infer_match_expr_inf(Expr, Variables);
 		infix_expr -> infer_infix_expr_type(Expr, ?Expr:value(Expr), Variables);
-		variable   -> Var = lists:filter(fun({V, _}) -> ?Expr:value(Expr) == V end, Variables),
-					  %erlang:display(Var),	
+		variable   -> Var = lists:filter(fun({V, _}) -> ?Expr:value(Expr) == V end, Variables),	
 					  case Var of 
 					  	[] -> {any, []};
 					  	[{_V, {Type, Val}}] -> {Type, Val}
@@ -93,16 +98,22 @@ infer_external_fun(Colon_op, Arg_list_expr) ->
 	Return_type.
 
 infer_internal_fun(Mod_name, Fun_name, Arg_list_expr) ->
-	Arg_list = ?Query:exec(Arg_list_expr, ?Expr:children()),
-	%erlang:display(Arg_list),
+	Arg_list_children = ?Query:exec(Arg_list_expr, ?Expr:children()),
+	Arg_list = lists:map(fun(Arg) -> infer_expr_inf(Arg, []) end, Arg_list_children),
 	Arity = length(Arg_list),
-	Actual_clauses = find_actual_clauses(Mod_name, Fun_name, Arity, Arg_list),
-	%erlang:display(Arg_list),
-	Actual_params = lists:map(fun(Expr) -> refanal_dataflow:reach_1st([Expr], [{safe, true}], true) end, Arg_list),
-	obtain_correspondent_patterns(Actual_params),
-	%erlang:display(Actual_params),
-	Variables = replace_params_with_args_val(Actual_params, Arg_list),
-	Fun_type = lists:map(fun(Clause) -> get_clause_type(Clause, Variables) end, Actual_clauses),
+	Actual_clauses_with_pats = find_actual_clauses(Mod_name, Fun_name, Arity, Arg_list_children),
+	Actual_clauses = lists:map(fun({Clause, _}) -> Clause end, Actual_clauses_with_pats),
+	%erlang:display({Fun_name, Actual_clauses}),
+	Clauses_patterns = lists:map(fun({_, Pat}) -> Pat end, Actual_clauses_with_pats),
+	%erlang:display({Fun_name, Clauses_patterns}),
+	Variables = replace_clauses_params_with_args(Clauses_patterns, Arg_list),
+	%erlang:display({Fun_name, Variables}),
+	%erlang:display(Clauses_patterns),
+	%erlang:display({actual_clauses, Actual_clauses}),
+	%erlang:display({variables, Variables}),
+	erlang:display(Fun_name),
+	Fun_type = get_clauses_type(Actual_clauses, Variables),
+	%erlang:display({Fun_name, Fun_type}),
 
 	A = 
 	case length(Fun_type) of
@@ -110,24 +121,23 @@ infer_internal_fun(Mod_name, Fun_name, Arg_list_expr) ->
 		_ -> {union, lists:flatten(Fun_type)}
 	end,
 
-	erlang:display(A),
+	%erlang:display({res, A}),
 	A.
 
-obtain_correspondent_patterns([]) -> [];
-obtain_correspondent_patterns([Par | Pars]) -> 
-	
-	
+replace_clauses_params_with_args([], _) -> [];
+replace_clauses_params_with_args([Pat | Pats], Values) ->
+	A = [replace_clause_params_with_args(Pat, Values) | replace_clauses_params_with_args(Pats, Values)],
+	%erlang:display(A),
+	A.
 
-replace_params_with_args_val([], []) -> [];
-replace_params_with_args_val([Par | Pars], [Arg | Args]) ->
+
+replace_clause_params_with_args([], []) -> [];
+replace_clause_params_with_args([Par | Pars], [Arg | Args]) ->
+	erlang:display({Par, Arg}),
 	case ?Expr:type(Par) of
-		variable -> case ?Expr:type(Arg) of
-						variable -> replace_params_with_args_val(Pars, Args);
-						_        -> [{?Expr:value(Par), infer_expr_inf(Arg, [])} | replace_params_with_args_val(Pars, Args)]
-					end;
-		_        -> replace_params_with_args_val(Pars, Args)
+		variable -> [{?Expr:value(Par), Arg} | replace_clause_params_with_args(Pars, Args)];
+		_        -> replace_clause_params_with_args(Pars, Args)
 	end.
-
 
 infer_parenthesis_inf(Expr, Variables) ->
 	[Child] = get_children(Expr),
@@ -142,7 +152,7 @@ infer_infix_expr_type(Expr, Operation, Variables) ->
 	[Sub_expr1, Sub_expr2] = get_children(Expr),
 	Expr_inf1 = infer_expr_inf(Sub_expr1, Variables),
 	Expr_inf2 = infer_expr_inf(Sub_expr2, Variables),
-	erlang:display({Expr_inf1, Expr_inf2}),
+	%erlang:display({Expr_inf1, Expr_inf2}),
 %Добавить проверку на правильность типа	
 	compute_infix_expr(Expr_inf1, Expr_inf2, Operation).
 
@@ -185,6 +195,10 @@ compute_prefix_expr({Type, []}, 'bnot') when (Type == number) or (Type == any) -
 compute_prefix_expr({_Type, _Value}, _Operation) ->
 	{none, []}.
 
+compute_infix_expr({union, Union_elems}, Expr2, Operation) -> 
+	{union, lists:map(fun(Expr1) -> compute_infix_expr(Expr1, Expr2, Operation) end, Union_elems)};
+compute_infix_expr(Expr1, {union, Union_elems}, Operation) -> 
+	{union, lists:map(fun(Expr2) -> compute_infix_expr(Expr1, Expr2, Operation) end, Union_elems)};
 compute_infix_expr({float, [Value1]}, {Type2, [Value2]}, '+') when ((Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) or (Type2 == float)) ->
 	{float, [Value1 + Value2]};
 compute_infix_expr({Type1, [Value1]}, {float, [Value2]}, '+') when ((Type1 == neg_integer) or (Type1 == pos_integer) or (Type1 == non_neg_integer) or (Type1 == integer) or (Type1 == float)) ->
@@ -327,9 +341,10 @@ get_actual_params(Application) ->
 find_actual_clause([], _) -> [];
 find_actual_clause([Pat | Pats], Pars) ->
 	Res = compare_terms(Pat, Pars),
+
 	case Res of 
-		true  -> [?Query:exec(hd(Pat), ?Expr:clause())];
-		possibly -> [?Query:exec(hd(Pat), ?Expr:clause()) | find_actual_clause(Pats, Pars)];
+		true  -> [Clause] = ?Query:exec(hd(Pat), ?Expr:clause()),
+				 [{Clause, Pat} | find_actual_clause(Pats, Pars)];
 		false -> find_actual_clause(Pats, Pars)
 	end.	
 
@@ -355,7 +370,7 @@ compare_terms([Pat | Pats], [Par | Pars]) ->
 								false -> false
 							end
 	end,
-	erlang:display(A),
+	%erlang:display(A),
 	A.
 
 compare_tuples(T1, T2) ->
