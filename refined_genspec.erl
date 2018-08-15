@@ -17,7 +17,12 @@ infer_fun_type(Mod_name, Fun_name, Arity, Variables) ->
 	Fun_node = get_fun_node(Mod_name, Fun_name, Arity),
 	Fun_def = get_fundef(Fun_node),
 	Clauses = get_clauses(Fun_def),
-	lists:map(fun(Clause) -> get_clause_type(Clause, Variables) end, Clauses).
+	Clauses_types = lists:map(fun(Clause) -> get_clause_type(Clause, Variables) end, Clauses),
+
+	case length(Clauses_types) of
+		1 -> Clauses_types;
+		_ -> {union, Clauses_types}
+	end.
 
 get_clause_type(Clause, Variables) ->
 	%erlang:display({Clause, Variables}),
@@ -37,9 +42,8 @@ define_bodies_type([Body | Bodies], Variables) ->
 
 	case Body_type of
 		{_Var_name, {_Type, _Value}} -> define_bodies_type(Bodies, [Body_type | Variables]);
-		_                         -> define_bodies_type(Bodies, Variables)
+		_                            -> define_bodies_type(Bodies, Variables)
 	end.
-
 
 find_actual_clauses(Mod_name, Fun_name, Arity, Actual_params) ->
 	Fun_node = get_fun_node(Mod_name, Fun_name, Arity),
@@ -60,13 +64,13 @@ infer_expr_inf(Expr, Variables) ->
 		prefix_expr -> infer_prefix_expr_type(Expr, ?Expr:value(Expr), Variables);
 		match_expr -> infer_match_expr_inf(Expr, Variables);
 		infix_expr -> infer_infix_expr_type(Expr, ?Expr:value(Expr), Variables);
-		variable   -> Var = lists:filter(fun({V, _}) -> ?Expr:value(Expr) == V end, Variables),	
+		variable   -> Var = find_variable_by_name(?Expr:value(Expr), Variables),	
 					  case Var of 
 					  	[] -> {any, []};
 					  	[{_V, {Type, Val}}] -> {Type, Val}
 					  end;
 		parenthesis -> infer_parenthesis_inf(Expr, Variables);
-		application -> infer_fun_app_type(Expr);
+		application -> infer_fun_app_type(Expr, Variables);
 		Simple_type    -> infer_simple_type(Expr)
 	end.
 
@@ -77,15 +81,23 @@ infer_simple_type(Expr) ->
 		_     -> {?Expr:type(Expr), [?Expr:value(Expr)]}
 	end.
 
-infer_fun_app_type(Fun_app) ->
-	[Expr, Arglist] = ?Query:exec(Fun_app, ?Expr:children()),
+infer_fun_app_type(Fun_app, Variables) ->
+	[Expr, Arg_list] = ?Query:exec(Fun_app, ?Expr:children()),
 	Function = ?Query:exec(Fun_app, ?Expr:function()),
 	[Fun_mod] = ?Query:exec(Function, ?Fun:module()),
 
 	case ?Expr:value(Expr) of
-		':' -> infer_external_fun(Expr, Arglist);
-		_   -> infer_internal_fun(?Mod:name(Fun_mod), ?Expr:value(Expr), Arglist)
+		':'      -> infer_external_fun(Expr, Arg_list);
+		variable -> infer_anonymus_function(?Expr:value(Expr), Arg_list, Variables);
+		_        -> infer_internal_fun(?Mod:name(Fun_mod), ?Expr:value(Expr), Arg_list)
 	end.
+
+infer_anonymus_function(Fun_name, Arg_list, Variables) ->
+	
+
+
+find_variable_by_name(Required_var_Name, Variables) ->
+	lists:filter(fun({Var_name, _}) -> Required_var_Name == Var_name end, Variables).
 
 infer_external_fun(Colon_op, Arg_list_expr) ->
 	[Module, Fun] = ?Query:exec(Colon_op, ?Expr:children()),
@@ -103,37 +115,23 @@ infer_internal_fun(Mod_name, Fun_name, Arg_list_expr) ->
 	Arity = length(Arg_list),
 	Actual_clauses_with_pats = find_actual_clauses(Mod_name, Fun_name, Arity, Arg_list_children),
 	Actual_clauses = lists:map(fun({Clause, _}) -> Clause end, Actual_clauses_with_pats),
-	%erlang:display({Fun_name, Actual_clauses}),
 	Clauses_patterns = lists:map(fun({_, Pat}) -> Pat end, Actual_clauses_with_pats),
-	%erlang:display({Fun_name, Clauses_patterns}),
 	Variables = replace_clauses_params_with_args(Clauses_patterns, Arg_list),
-	%erlang:display({Fun_name, Variables}),
-	%erlang:display(Clauses_patterns),
-	%erlang:display({actual_clauses, Actual_clauses}),
-	%erlang:display({variables, Variables}),
-	erlang:display(Fun_name),
+	erlang:display(Variables),
 	Fun_type = get_clauses_type(Actual_clauses, Variables),
-	%erlang:display({Fun_name, Fun_type}),
 
-	A = 
 	case length(Fun_type) of
 		1 -> hd(Fun_type);
-		_ -> {union, lists:flatten(Fun_type)}
-	end,
-
-	%erlang:display({res, A}),
-	A.
+		_ -> {union, Fun_type}
+	end.
 
 replace_clauses_params_with_args([], _) -> [];
 replace_clauses_params_with_args([Pat | Pats], Values) ->
-	A = [replace_clause_params_with_args(Pat, Values) | replace_clauses_params_with_args(Pats, Values)],
-	%erlang:display(A),
-	A.
+	[replace_clause_params_with_args(Pat, Values) | replace_clauses_params_with_args(Pats, Values)].
 
 
 replace_clause_params_with_args([], []) -> [];
 replace_clause_params_with_args([Par | Pars], [Arg | Args]) ->
-	erlang:display({Par, Arg}),
 	case ?Expr:type(Par) of
 		variable -> [{?Expr:value(Par), Arg} | replace_clause_params_with_args(Pars, Args)];
 		_        -> replace_clause_params_with_args(Pars, Args)
@@ -161,6 +159,10 @@ infer_prefix_expr_type(Expr, Operation, Variables) ->
 	Sub_expr_inf = infer_expr_inf(Sub_expr, Variables),
 	compute_prefix_expr(Sub_expr_inf, Operation).
 
+
+
+compute_prefix_expr({union, Union_elems}, Operation) -> 
+	{union, lists:map(fun(Expr1) -> compute_prefix_expr(Expr1, Operation) end, Union_elems)};
 
 compute_prefix_expr({float, [Value]}, '+') ->
 	{float, [+Value]};
@@ -195,10 +197,14 @@ compute_prefix_expr({Type, []}, 'bnot') when (Type == number) or (Type == any) -
 compute_prefix_expr({_Type, _Value}, _Operation) ->
 	{none, []}.
 
+compute_infix_expr({union, Union_elems1}, {union, Union_elems2}, Operation) -> 
+	Two_unions_merged = [compute_infix_expr(Union_elem1, Union_elem2, Operation) || Union_elem1 <- Union_elems1, Union_elem2 <- Union_elems2],
+	{union, lists:usort(Two_unions_merged)};
 compute_infix_expr({union, Union_elems}, Expr2, Operation) -> 
 	{union, lists:map(fun(Expr1) -> compute_infix_expr(Expr1, Expr2, Operation) end, Union_elems)};
 compute_infix_expr(Expr1, {union, Union_elems}, Operation) -> 
 	{union, lists:map(fun(Expr2) -> compute_infix_expr(Expr1, Expr2, Operation) end, Union_elems)};
+
 compute_infix_expr({float, [Value1]}, {Type2, [Value2]}, '+') when ((Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) or (Type2 == float)) ->
 	{float, [Value1 + Value2]};
 compute_infix_expr({Type1, [Value1]}, {float, [Value2]}, '+') when ((Type1 == neg_integer) or (Type1 == pos_integer) or (Type1 == non_neg_integer) or (Type1 == integer) or (Type1 == float)) ->
@@ -385,8 +391,8 @@ compare_tuples(T1, T2) ->
 compare_cons(Con1, Con2) ->
 	Children1 = construct_list_from_cons_expr(Con1),
 	Children2 = construct_list_from_cons_expr(Con2),
-	erlang:display(Children1),
-	erlang:display(Children2),
+	%erlang:display(Children1),
+	%erlang:display(Children2),
 	compare_lists_elems(Children1, Children2).
 
 compare_simple_type(Pat, Par) ->
