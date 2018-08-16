@@ -70,6 +70,7 @@ infer_expr_inf(Expr, Variables) ->
 					  	[{_V, {Type, Val}}] -> {Type, Val}
 					  end;
 		parenthesis -> infer_parenthesis_inf(Expr, Variables);
+		fun_expr    -> Expr;
 		application -> infer_fun_app_type(Expr, Variables);
 		Simple_type    -> infer_simple_type(Expr)
 	end.
@@ -83,21 +84,22 @@ infer_simple_type(Expr) ->
 
 infer_fun_app_type(Fun_app, Variables) ->
 	[Expr, Arg_list] = ?Query:exec(Fun_app, ?Expr:children()),
-	Function = ?Query:exec(Fun_app, ?Expr:function()),
-	[Fun_mod] = ?Query:exec(Function, ?Fun:module()),
 
-	case ?Expr:value(Expr) of
-		':'      -> infer_external_fun(Expr, Arg_list);
-		variable -> infer_anonymus_function(?Expr:value(Expr), Arg_list, Variables);
-		_        -> infer_internal_fun(?Mod:name(Fun_mod), ?Expr:value(Expr), Arg_list)
+	case ?Expr:type(Expr) of 
+			variable -> infer_anonymus_function(?Expr:value(Expr), Arg_list, Variables);
+			_        ->	case ?Expr:value(Expr) of
+							':'      -> infer_external_fun(Expr, Arg_list);
+							_        -> Function = ?Query:exec(Fun_app, ?Expr:function()),
+						                [Fun_mod] = ?Query:exec(Function, ?Fun:module()),
+										infer_internal_fun(?Mod:name(Fun_mod), ?Expr:value(Expr), Arg_list)
+						end
 	end.
-
-infer_anonymus_function(Fun_name, Arg_list, Variables) ->
-	
-
 
 find_variable_by_name(Required_var_Name, Variables) ->
 	lists:filter(fun({Var_name, _}) -> Required_var_Name == Var_name end, Variables).
+
+infer_anonymus_function(Fun_name, Arg_list, Variables) ->
+	[{_Var_name, Fun_expr}] = find_variable_by_name(Fun_name, Variables).
 
 infer_external_fun(Colon_op, Arg_list_expr) ->
 	[Module, Fun] = ?Query:exec(Colon_op, ?Expr:children()),
@@ -114,10 +116,12 @@ infer_internal_fun(Mod_name, Fun_name, Arg_list_expr) ->
 	Arg_list = lists:map(fun(Arg) -> infer_expr_inf(Arg, []) end, Arg_list_children),
 	Arity = length(Arg_list),
 	Actual_clauses_with_pats = find_actual_clauses(Mod_name, Fun_name, Arity, Arg_list_children),
+	%erlang:display(Actual_clauses_with_pats),
 	Actual_clauses = lists:map(fun({Clause, _}) -> Clause end, Actual_clauses_with_pats),
 	Clauses_patterns = lists:map(fun({_, Pat}) -> Pat end, Actual_clauses_with_pats),
+	%erlang:display(Clauses_patterns),
 	Variables = replace_clauses_params_with_args(Clauses_patterns, Arg_list),
-	erlang:display(Variables),
+	%erlang:display(Variables),
 	Fun_type = get_clauses_type(Actual_clauses, Variables),
 
 	case length(Fun_type) of
@@ -126,9 +130,8 @@ infer_internal_fun(Mod_name, Fun_name, Arg_list_expr) ->
 	end.
 
 replace_clauses_params_with_args([], _) -> [];
-replace_clauses_params_with_args([Pat | Pats], Values) ->
-	[replace_clause_params_with_args(Pat, Values) | replace_clauses_params_with_args(Pats, Values)].
-
+replace_clauses_params_with_args([Pat | Pats], Args) ->
+	[replace_clause_params_with_args(Pat, Args) | replace_clauses_params_with_args(Pats, Args)].
 
 replace_clause_params_with_args([], []) -> [];
 replace_clause_params_with_args([Par | Pars], [Arg | Args]) ->
