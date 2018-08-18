@@ -98,8 +98,23 @@ infer_fun_app_type(Fun_app, Variables) ->
 find_variable_by_name(Required_var_Name, Variables) ->
 	lists:filter(fun({Var_name, _}) -> Required_var_Name == Var_name end, Variables).
 
-infer_anonymus_function(Fun_name, Arg_list, Variables) ->
-	[{_Var_name, Fun_expr}] = find_variable_by_name(Fun_name, Variables).
+infer_anonymus_function(Fun_name, Arg_list_expr, []) ->
+	Arg_list_children = ?Query:exec(Arg_list_expr, ?Expr:children()),
+	Arg_list = lists:map(fun(Arg) -> infer_expr_inf(Arg, []) end, Arg_list_children),
+	{any, []};
+infer_anonymus_function(Fun_name, Arg_list_expr, Variables) ->
+	[{_Var_name, Fun_expr}] = find_variable_by_name(Fun_name, Variables),
+	Arg_list_children = ?Query:exec(Arg_list_expr, ?Expr:children()),
+	Arg_list = lists:map(fun(Arg) -> infer_expr_inf(Arg, Variables) end, Arg_list_children),
+
+	%erlang:display(Arg_list),
+	Clause = ?Query:exec(Fun_expr, ?Expr:clauses()),
+	Patterns = ?Query:exec(Clause, ?Clause:patterns()),
+	erlang:display(Patterns),
+	[Fun_expr_vars] = replace_clauses_params_with_args([Patterns], Arg_list),
+
+	erlang:display(Fun_expr_vars),
+	get_clause_type(Clause, Fun_expr_vars).
 
 infer_external_fun(Colon_op, Arg_list_expr) ->
 	[Module, Fun] = ?Query:exec(Colon_op, ?Expr:children()),
@@ -116,12 +131,10 @@ infer_internal_fun(Mod_name, Fun_name, Arg_list_expr) ->
 	Arg_list = lists:map(fun(Arg) -> infer_expr_inf(Arg, []) end, Arg_list_children),
 	Arity = length(Arg_list),
 	Actual_clauses_with_pats = find_actual_clauses(Mod_name, Fun_name, Arity, Arg_list_children),
-	%erlang:display(Actual_clauses_with_pats),
 	Actual_clauses = lists:map(fun({Clause, _}) -> Clause end, Actual_clauses_with_pats),
 	Clauses_patterns = lists:map(fun({_, Pat}) -> Pat end, Actual_clauses_with_pats),
-	%erlang:display(Clauses_patterns),
 	Variables = replace_clauses_params_with_args(Clauses_patterns, Arg_list),
-	%erlang:display(Variables),
+	erlang:display(Variables),
 	Fun_type = get_clauses_type(Actual_clauses, Variables),
 
 	case length(Fun_type) of
@@ -161,8 +174,6 @@ infer_prefix_expr_type(Expr, Operation, Variables) ->
 	[Sub_expr] = ?Query:exec(Expr, ?Expr:children()),
 	Sub_expr_inf = infer_expr_inf(Sub_expr, Variables),
 	compute_prefix_expr(Sub_expr_inf, Operation).
-
-
 
 compute_prefix_expr({union, Union_elems}, Operation) -> 
 	{union, lists:map(fun(Expr1) -> compute_prefix_expr(Expr1, Operation) end, Union_elems)};
