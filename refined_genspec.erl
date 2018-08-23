@@ -1,5 +1,7 @@
 -module(refined_genspec).
 
+%Сравнить результат тайпера и рузультат моего алгоритма. Отрбасывать все варианты тайпера, которые совсем не совпадают с результатом моего алгоритма. Например Если результат моего алгоритма выдаёт "integer | list", а тайпер "number | list | atom", то оставляем только "number | list". 
+
 %------TODO list----------------
 %1)Process guard expressions(В разделе "Defining actual clauses")
 %2)Process fun expressions  (В разделе "Defining actual clauses")
@@ -45,7 +47,6 @@ define_bodies_type([Last_body], Variables) ->
 	end;
 define_bodies_type([Body | Bodies], Variables) ->
 	Body_type = infer_expr_inf(Body, Variables),
-	%erlang:display(Body_type),
 
 	case Body_type of
 		{_Var_name, Value} -> define_bodies_type(Bodies, [Body_type | Variables]);
@@ -91,7 +92,6 @@ infer_simple_type(Expr) ->
 
 infer_fun_app_type(Fun_app, Variables) ->
 	[Expr, Arg_list] = ?Query:exec(Fun_app, ?Expr:children()),
-	erlang:display(Variables),
 
 	case ?Expr:type(Expr) of 
 			variable -> infer_anonymus_function(?Expr:value(Expr), Arg_list, Variables);
@@ -99,7 +99,7 @@ infer_fun_app_type(Fun_app, Variables) ->
 							':'      -> infer_external_fun(Expr, Arg_list);
 							_        -> Function = ?Query:exec(Fun_app, ?Expr:function()),
 						                [Fun_mod] = ?Query:exec(Function, ?Fun:module()),
-										infer_internal_fun(?Mod:name(Fun_mod), ?Expr:value(Expr), Arg_list)
+										infer_internal_fun(?Mod:name(Fun_mod), ?Expr:value(Expr), Arg_list, Variables)
 						end
 	end.
 
@@ -117,7 +117,6 @@ change_var_value([Var | Variables], NewVariable) ->
 	[Var | change_var_value(Variables, NewVariable)].
 
 infer_anonymus_function(Fun_name, Arg_list_expr, Variables) ->
-	%erlang:display(Variables),
 	case find_variable_by_name(Fun_name, Variables) of
 		[]                          -> infer_anonymus_func_app_without_body(Fun_name, Arg_list_expr, Variables);
 		[{Var_name, {fun_expr, _}}] -> infer_anonymus_func_app(Fun_name, Arg_list_expr, Variables);
@@ -138,7 +137,6 @@ infer_anonymus_func_app(Fun_name, Arg_list_expr, Variables) ->
 	Clause = ?Query:exec(Fun_expr, ?Expr:clauses()),
 	Patterns = ?Query:exec(Clause, ?Clause:patterns()),
 	[Fun_expr_vars] = replace_clauses_params_with_args([Patterns], Arg_list),
-	%erlang:display(Fun_expr_vars),
 
 	get_clause_type(Clause, change_vars_values(Variables, Fun_expr_vars)).
 
@@ -152,15 +150,14 @@ infer_external_fun(Colon_op, Arg_list_expr) ->
 	{_, [Return_type]} = spec_proc:get_spec_type(Mod_name, Fun_name, Arity),
 	Return_type.
 
-infer_internal_fun(Mod_name, Fun_name, Arg_list_expr) ->
+infer_internal_fun(Mod_name, Fun_name, Arg_list_expr, Parent_fun_variables) ->
 	Arg_list_children = ?Query:exec(Arg_list_expr, ?Expr:children()),
-	Arg_list = lists:map(fun(Arg) -> infer_expr_inf(Arg, []) end, Arg_list_children),
+	Arg_list = lists:map(fun(Arg) -> infer_expr_inf(Arg, Parent_fun_variables) end, Arg_list_children),
 	Arity = length(Arg_list),
 	Actual_clauses_with_pats = find_actual_clauses(Mod_name, Fun_name, Arity, Arg_list_children),
 	Actual_clauses = lists:map(fun({Clause, _}) -> Clause end, Actual_clauses_with_pats),
 	Clauses_patterns = lists:map(fun({_, Pat}) -> Pat end, Actual_clauses_with_pats),
 	Variables = replace_clauses_params_with_args(Clauses_patterns, Arg_list),
-	%erlang:display(Variables),
 	Fun_type = get_clauses_type(Actual_clauses, Variables),
 
 	case length(Fun_type) of
