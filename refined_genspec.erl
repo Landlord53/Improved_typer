@@ -47,9 +47,10 @@ define_bodies_type([Last_body], Variables) ->
 	end;
 define_bodies_type([Body | Bodies], Variables) ->
 	Body_type = infer_expr_inf(Body, Variables),
+	%erlang:display(Body_type),
 
 	case Body_type of
-		{_Var_name, Value} -> define_bodies_type(Bodies, [Body_type | Variables]);
+		{_Var_name, {_Type, _Value}} -> define_bodies_type(Bodies, [Body_type | Variables]);
 		_                  -> define_bodies_type(Bodies, Variables)
 	end.
 
@@ -72,15 +73,31 @@ infer_expr_inf(Expr, Variables) ->
 		prefix_expr -> infer_prefix_expr_type(Expr, ?Expr:value(Expr), Variables);
 		match_expr -> infer_match_expr_inf(Expr, Variables);
 		infix_expr -> infer_infix_expr_type(Expr, ?Expr:value(Expr), Variables);
-		variable   -> Var = find_variable_by_name(?Expr:value(Expr), Variables),	
-					  case Var of 
-					  	[] -> {any, []};
-					  	[{_V, {Type, Val}}] -> {Type, Val}
-					  end;
+		variable   -> infer_var_type(Expr, Variables);
 		parenthesis -> infer_parenthesis_inf(Expr, Variables);
 		fun_expr    -> {fun_expr, Expr};
 		application -> infer_fun_app_type(Expr, Variables);
+		cons        -> infer_cons_expr_type(Expr, Variables);
+		tuple       -> infer_tuple_expr_type(Expr,Variables);
+		implicit_fun -> infer_implicit_fun_expr(Expr, Variables);
 		Simple_type    -> infer_simple_type(Expr)
+	end.
+
+infer_implicit_fun_expr(Expr, Variables) ->
+	[Fun_info_expr, Arity_expr] = ?Query:exec(Expr, ?Expr:children()),
+
+	case ?Expr:value(Fun_info_expr) of
+		':' -> 	[Mod_name_expr, Fun_name_expr] = ?Query:exec(Fun, ?Expr:children()),
+				{implicit_fun, {?Expr:value(Mod_name_expr), ?Expr:value(Fun_name_expr), ?Expr:value(Arity_expr)}};
+		_   ->  {implicit_fun, {current_mod, ?Expr:value(Fun_info_expr), ?Expr:value(Arity_expr)}}
+	end.
+
+infer_var_type(Expr, Variables) ->
+	Var = find_variable_by_name(?Expr:value(Expr), Variables),	
+
+	case Var of 
+		[] -> {any, []};
+		[{_Var_name, {Type, Value}}] -> {Type, Value}
 	end.
 
 infer_simple_type(Expr) ->
@@ -90,13 +107,23 @@ infer_simple_type(Expr) ->
 		_     -> {?Expr:type(Expr), [?Expr:value(Expr)]}
 	end.
 
+infer_cons_expr_type(Expr, Variables) ->
+	List_in_basic_form = construct_list_from_cons_expr(Expr, Variables),
+	convert_value_in_basic_format_to_compound(List_in_basic_form).
+
+infer_tuple_expr_type(Expr, Variables) ->
+	Tuple_elems_list = construct_tuple(Expr, Variables),
+	Tuple_in_basic_format = list_to_tuple(Tuple_elems_list),
+	convert_value_in_basic_format_to_compound(Tuple_in_basic_format).
+
 infer_fun_app_type(Fun_app, Variables) ->
 	[Expr, Arg_list] = ?Query:exec(Fun_app, ?Expr:children()),
 
 	case ?Expr:type(Expr) of 
 			variable -> infer_anonymus_function(?Expr:value(Expr), Arg_list, Variables);
 			_        ->	case ?Expr:value(Expr) of
-							':'      -> infer_external_fun(Expr, Arg_list);
+							':'      -> [Module, Fun] = ?Query:exec(Expr, ?Expr:children()),
+										infer_external_fun(?Expr:value(Module), ?Expr:value(Fun), Arg_list);
 							_        -> Function = ?Query:exec(Fun_app, ?Expr:function()),
 						                [Fun_mod] = ?Query:exec(Function, ?Fun:module()),
 										infer_internal_fun(?Mod:name(Fun_mod), ?Expr:value(Expr), Arg_list, Variables)
@@ -106,27 +133,25 @@ infer_fun_app_type(Fun_app, Variables) ->
 find_variable_by_name(Required_var_Name, Variables) ->
 	lists:filter(fun({Var_name, _}) -> Required_var_Name == Var_name end, Variables).
 
-change_vars_values(_, []) -> [];
-change_vars_values(Variables, [New_var | New_vars]) ->
-	change_var_value(Variables, New_var) ++ change_vars_values(Variables, New_vars). 
+is_bounded(Variable_name, Variables) ->
+	Variable = find_variable_by_name(Variable_name, Variables),
 
-change_var_value([], _) -> [];
-change_var_value([{Var_name, _Value} | Variables], {Var_name, New_value}) ->
-	[{Var_name, New_value} | Variables];
-change_var_value([Var | Variables], NewVariable) ->
-	[Var | change_var_value(Variables, NewVariable)].
+	case Variable of
+		[] -> false;
+		_  -> true
+	end.
 
 infer_anonymus_function(Fun_name, Arg_list_expr, Variables) ->
 	case find_variable_by_name(Fun_name, Variables) of
 		[]                          -> infer_anonymus_func_app_without_body(Fun_name, Arg_list_expr, Variables);
 		[{Var_name, {fun_expr, _}}] -> infer_anonymus_func_app(Fun_name, Arg_list_expr, Variables);
+		[{Var_name, {implicit_fun, {current_mod, _Fun_name, _Arity}}}] -> infer_internal_fun()
 		_                           -> {none, []}
 	end.
 
 infer_anonymus_func_app_without_body(Fun_name, Arg_list_expr, Variables) ->
 	Arg_list_children = ?Query:exec(Arg_list_expr, ?Expr:children()),
 	Arg_list = lists:map(fun(Arg) -> infer_expr_inf(Arg, []) end, Arg_list_children),
-	%erlang:display(Arg_list),
 	{func, [Arg_list, [any]]}.
 
 infer_anonymus_func_app(Fun_name, Arg_list_expr, Variables) ->
@@ -134,19 +159,34 @@ infer_anonymus_func_app(Fun_name, Arg_list_expr, Variables) ->
 	Arg_list_children = ?Query:exec(Arg_list_expr, ?Expr:children()),
 	Arg_list = lists:map(fun(Arg) -> infer_expr_inf(Arg, Variables) end, Arg_list_children),
 
+
 	Clause = ?Query:exec(Fun_expr, ?Expr:clauses()),
 	Patterns = ?Query:exec(Clause, ?Clause:patterns()),
 	[Fun_expr_vars] = replace_clauses_params_with_args([Patterns], Arg_list),
 
-	get_clause_type(Clause, change_vars_values(Variables, Fun_expr_vars)).
+	erlang:display(Fun_expr_vars),
+	erlang:display(Variables),
+	A = replace_shadowed_vars_vals(Fun_expr_vars, Variables),
+	erlang:display(A),
+	
+	get_clause_type(Clause, A).
 
-infer_external_fun(Colon_op, Arg_list_expr) ->
-	[Module, Fun] = ?Query:exec(Colon_op, ?Expr:children()),
+replace_shadowed_vars_vals([], Vars) -> Vars;
+replace_shadowed_vars_vals([Anon_fun_var | Anon_fun_vars], Vars) ->
+	New_var_list = replace_shadowed_vars_val(Anon_fun_var, Vars, []),
+	replace_shadowed_vars_vals(Anon_fun_vars, New_var_list).
+	
+replace_shadowed_vars_val(Anon_fun_var, [], New_var_list) ->
+	[Anon_fun_var | New_var_list];
+replace_shadowed_vars_val({Var_name, Value1}, [{Var_name, Value2} | Vars], New_var_list) ->
+	[{Var_name, Value1} | New_var_list] ++ Vars;
+replace_shadowed_vars_val(Anon_fun_var, [Var | Vars], New_var_list) ->
+	replace_shadowed_vars_val(Anon_fun_var, Vars, [Var | New_var_list]).
+
+infer_external_fun(Mod_name, Fun_name, Arg_list_expr) ->
 	Arg_list = ?Query:exec(Arg_list_expr, ?Expr:children()),
 	Args = ?Query:exec(Arg_list, ?Expr:children()),
 	Arity = length(Args),
-	Mod_name = ?Expr:value(Module),
-	Fun_name = ?Expr:value(Fun),
 	{_, [Return_type]} = spec_proc:get_spec_type(Mod_name, Fun_name, Arity),
 	Return_type.
 
@@ -159,6 +199,7 @@ infer_internal_fun(Mod_name, Fun_name, Arg_list_expr, Parent_fun_variables) ->
 	Clauses_patterns = lists:map(fun({_, Pat}) -> Pat end, Actual_clauses_with_pats),
 	Variables = replace_clauses_params_with_args(Clauses_patterns, Arg_list),
 	Fun_type = get_clauses_type(Actual_clauses, Variables),
+	%erlang:display(Fun_type),
 
 	case length(Fun_type) of
 		1 -> hd(Fun_type);
@@ -185,11 +226,41 @@ infer_match_expr_inf(Expr, Variables) ->
 
 	{?Expr:value(Variable), infer_expr_inf(Sub_expr, Variables)}.
 
+bound_variables(Variable1, Variable2, Variables) ->
+	case ?Expr:type(Variable1) of
+		variable -> bound_single_variable(Variable1, Variable2, Variables);
+		_        -> ok
+	end.	
+
+bound_single_variable(Variable, Expr, Variables) ->
+	Is_bounded = is_bounded(Variable, Variables),	
+
+	case Is_bounded of
+		true  -> Variable1_type = infer_expr_inf(Variable, Variables),
+				 Variable2_type = infer_expr_inf(Expr, Variables);
+
+
+
+		false -> {?Expr:value(Variable), infer_expr_inf(Expr, Variables)}
+	end.	
+
+compare_types(Type, Type) ->
+	true;
+compare_types({any, _Val1}, _Type2) ->
+	true;
+compare_types(_Type1, {any, _Val2}) ->
+	true;
+compare_types({number, _Val1}, {Type2, _Val2}) when ((Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) or (Type2 == float) or (Type2 == number)) ->
+	true;
+compare_types({Type1, _Val1}, {number, _Val2}) when ((Type1 == neg_integer) or (Type1 == pos_integer) or (Type1 == non_neg_integer) or (Type1 == integer) or (Type1 == float) or (Type1 == number)) ->
+	true;
+compare_types({list, Vals1}, {list, Vals2}) ->
+	ok.
+
 infer_infix_expr_type(Expr, Operation, Variables) ->
 	[Sub_expr1, Sub_expr2] = get_children(Expr),
 	Expr_inf1 = infer_expr_inf(Sub_expr1, Variables),
 	Expr_inf2 = infer_expr_inf(Sub_expr2, Variables),
-	%erlang:display({Expr_inf1, Expr_inf2}),
 %Добавить проверку на правильность типа	
 	compute_infix_expr(Expr_inf1, Expr_inf2, Operation).
 
@@ -348,6 +419,64 @@ compute_infix_expr(_A, _B, _Operation) ->
 	{none, []}.
 
 %---------------------------------Helper functions---------------------------------------------
+convert_values_in_basic_format_to_compound([]) -> [];
+convert_values_in_basic_format_to_compound([H | T]) ->
+	[convert_value_in_basic_format_to_compound(H) | convert_values_in_basic_format_to_compound(T)].
+
+convert_value_in_basic_format_to_compound([]) -> 
+	[];
+convert_value_in_basic_format_to_compound({list, []}) -> 
+	{list, []};
+convert_value_in_basic_format_to_compound('...') -> 
+	'...';
+convert_value_in_basic_format_to_compound(Value) when is_integer(Value)->
+	{integer, [Value]};
+convert_value_in_basic_format_to_compound(Value) when is_float(Value) ->
+	{float, [Value]};
+convert_value_in_basic_format_to_compound(Value) when is_atom(Value) ->
+	{atom, [Value]};
+convert_value_in_basic_format_to_compound(Value) when is_boolean(Value) ->
+	{boolean, [Value]};
+convert_value_in_basic_format_to_compound({variable, Value}) ->
+	{variable, Value};
+convert_value_in_basic_format_to_compound(Value) when is_list(Value) ->
+	{list, convert_values_in_basic_format_to_compound(Value)};
+convert_value_in_basic_format_to_compound(Value) when is_tuple(Value) ->
+	Tuple_elems_list = tuple_to_list(Value),
+	{tuple, convert_values_in_basic_format_to_compound(Tuple_elems_list)}.
+
+convert_values_in_compound_format_to_basic([]) -> [];
+convert_values_in_compound_format_to_basic([H | T]) ->
+	[convert_value_in_compound_format_to_basic(H) | convert_values_in_compound_format_to_basic(T)].
+
+convert_value_in_compound_format_to_basic({list, []}) -> 
+	[];
+convert_value_in_compound_format_to_basic('...') -> 
+	'...';
+convert_value_in_compound_format_to_basic({Any_value, []}) ->
+ 	undefinied;
+convert_value_in_compound_format_to_basic({Type, [Value]}) when is_integer(Type) or is_float(Type) or is_atom(Type) or is_boolean(Type) ->
+	Value;
+convert_value_in_compound_format_to_basic({variable, Value}) ->
+	{variable, Value};
+convert_value_in_compound_format_to_basic({list, Values}) ->
+	convert_values_in_compound_format_to_basic(Values);
+convert_value_in_compound_format_to_basic({tuple, Values}) ->
+	Tuple_elems_list = convert_values_in_compound_format_to_basic(Values),
+	list_to_tuple(Tuple_elems_list).
+
+get_compound_var_value(Var_expr, Variables) ->
+	Var_type = infer_var_type(Var_expr, Variables),
+
+	case Var_type of
+		{any, []} -> {variable, [undefinied]};
+		_         -> Var_type 
+	end.
+
+get_basic_var_value(Var_expr, Variables) ->
+	Compound_var_value = get_compound_var_value(Var_expr, Variables),
+	convert_value_in_compound_format_to_basic(Compound_var_value).
+
 get_path(Mod_name) ->
 	Mod = ?Query:exec(?Mod:find(Mod_name)),
 	File = ?Query:exec(Mod, ?Mod:file()),
@@ -396,7 +525,6 @@ compare_terms([Pat | Pats], [Par | Pars]) ->
 	Param_type = ?Expr:type(Par),
 	Pat_type = ?Expr:type(Pat),
 
-	A = 
 	case {Param_type, Pat_type} of
 		{cons, cons}     -> case compare_cons(Pat, Par) of
 						   		true  -> compare_terms(Pats, Pars);
@@ -412,9 +540,7 @@ compare_terms([Pat | Pats], [Par | Pars]) ->
 								true  -> compare_terms(Pats, Pars);
 								false -> false
 							end
-	end,
-	%erlang:display(A),
-	A.
+	end.
 
 compare_tuples(T1, T2) ->
 	Children1 = ?Query:exec(T1, ?Expr:children()),
@@ -426,19 +552,18 @@ compare_tuples(T1, T2) ->
 	end.
 
 compare_cons(Con1, Con2) ->
-	Children1 = construct_list_from_cons_expr(Con1),
-	Children2 = construct_list_from_cons_expr(Con2),
-	%erlang:display(Children1),
-	%erlang:display(Children2),
-	compare_lists_elems(Children1, Children2).
+	{list, List_elems1} = construct_list_from_cons_expr(Con1, []),
+	{list, List_elems2} = construct_list_from_cons_expr(Con2, []),
+
+	compare_lists_elems(List_elems1, List_elems2).
 
 compare_simple_type(Pat, Par) ->
 	?Expr:value(Pat) =:= ?Expr:value(Par).
 
 compare_lists_elems(L, L) -> true;
-compare_lists_elems(empty_list, _)  ->
+compare_lists_elems({list, []}, _)  ->
 	false;
-compare_lists_elems(_, empty_list)  ->
+compare_lists_elems(_, {list, []})  ->
 	false;
 compare_lists_elems(['...'], _) ->
 	true;
@@ -464,61 +589,54 @@ compare_lists_elems([H1 | T1], [H2 | T2]) ->
 		false -> false
 	end.
 
-extract_expr_vals([]) -> [];
-extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}]) ->
-	Left_cons_expr_list = construct_list_from_expr(Left_cons_expr),
-	Right_cons_expr_list = construct_list_from_expr(Right_cons_expr),
+extract_expr_vals([], _) -> [];
+extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Variables) ->
+	Left_cons_expr_list = extract_expr_val(Left_cons_expr, Variables),
+	Right_cons_expr_list = extract_expr_val(Right_cons_expr, Variables),
 
 	case Right_cons_expr_list of
-		empty_list    -> Left_cons_expr_list;
+		{list, []}    -> Left_cons_expr_list;
 		{variable, _} -> Left_cons_expr_list ++ ['...'];
 		_             -> Left_cons_expr_list ++ Right_cons_expr_list
 	end;
-extract_expr_vals([H | T]) ->
+extract_expr_vals([H | T], Variables) ->
+
 	case ?Expr:type(H) of 
-		cons -> [construct_list_from_cons_expr(H)];
-		list -> construct_list_from_list_expr(H);
-		tuple -> [construct_tuple(H) | extract_expr_vals(T)];
-		variable -> [{variable, [?Expr:value(H)]} | extract_expr_vals(T)];
-		_        -> [?Expr:value(H) | extract_expr_vals(T)] 		
-	end;
-extract_expr_vals(Cons_child) ->
-	case ?Expr:type(Cons_child) of 
-		cons -> empty_list;
-		list -> construct_list_from_list_expr(Cons_child);
-		tuple -> construct_tuple(Cons_child);
-		variable -> {variable, [?Expr:value(Cons_child)]};
-		_        -> ?Expr:value(Cons_child)		
+		cons -> [construct_list_from_cons_expr(H, Variables) | extract_expr_vals(T, Variables)];
+		list -> construct_list_from_list_expr(H, Variables) ++ extract_expr_vals(T, Variables);
+		tuple -> [construct_tuple(H, Variables) | extract_expr_vals(T, Variables)];
+		variable -> [get_basic_var_value(H, Variables) | extract_expr_vals(T, Variables)];
+		_        -> [?Expr:value(H) | extract_expr_vals(T, Variables)] 		
 	end.
 
-construct_list_from_expr(Expr) ->
+extract_expr_val(Expr, Variables) ->
 	case ?Expr:type(Expr) of
-		cons     -> construct_list_from_cons_expr(Expr);
-		list     -> construct_list_from_list_expr(Expr);
-		tuple    -> construct_tuple(Expr);
-		variable -> {variable, [?Expr:value(Expr)]};
+		cons     -> construct_list_from_cons_expr(Expr, Variables);
+		list     -> construct_list_from_list_expr(Expr, Variables);
+		tuple    -> construct_tuple(Expr, Variables);
+		variable -> get_basic_var_value(Expr, Variables);
 		_        -> ?Expr:value(Expr)	
 	end.
 
-construct_tuple([]) -> [];
-construct_tuple(Tuple) ->
+construct_tuple([], Variables) -> [];
+construct_tuple(Tuple, Variables) ->
 	Children = ?Query:exec(Tuple, ?Expr:children()),
-	Vals = extract_expr_vals(Children).
+	extract_expr_vals(Children, Variables).
 
-construct_list_from_cons_expr(Cons) ->
+construct_list_from_cons_expr(Cons, Variables) ->
 	Children = ?Query:exec(Cons, ?Expr:children()),
 
 	case length(Children) of
-		0 -> extract_expr_vals(Cons);
-		1 -> extract_expr_vals(Children);
+		0 -> {list, []};
+		1 -> extract_expr_vals(Children, Variables);
 		2 -> [Left_cons_expr, Right_cons_expr] = Children,
-			 extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}])
+			 extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Variables)
 	end.
 
-construct_list_from_list_expr([]) -> [];
-construct_list_from_list_expr(L) ->
+construct_list_from_list_expr([], Variables) -> [];
+construct_list_from_list_expr(L, Variables) ->
 	Children = ?Query:exec(L, ?Expr:children()),
-	extract_expr_vals(Children).
+	extract_expr_vals(Children, Variables).
 
 %--------------------Extraction of a function specification from the typer result--------------------------------------
 extract_matches([]) -> [];
@@ -600,7 +718,7 @@ compute_arity([_ | T], List, Tupple, Fun, Binary, Arity) ->
 
 %--------------------------------Testing------------------------------------------
 print_expr_val(Expr) ->
-	Actual_vals = extract_expr_vals([Expr]),
+	Actual_vals = extract_expr_vals([Expr], []),
 
 	case ?Expr:type() of
 		tuple -> erlang:list_to_tuple(Actual_vals);
