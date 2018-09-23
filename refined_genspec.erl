@@ -47,7 +47,6 @@ define_bodies_type([Last_body], Variables) ->
 	end;
 define_bodies_type([Body | Bodies], Variables) ->
 	Body_type = infer_expr_inf(Body, Variables),
-	%erlang:display(Body_type),
 
 	case Body_type of
 		{_Var_name, {_Type, _Value}} -> define_bodies_type(Bodies, [Body_type | Variables]);
@@ -145,7 +144,6 @@ is_bounded(Variable_name, Variables) ->
 	end.
 
 infer_anonymus_function(Var_name, Arg_list_expr, Variables) ->
-	erlang:display(Var_name),
 	case find_variable_by_name(Var_name, Variables) of
 		[]                          -> infer_anonymus_func_app_without_body(Arg_list_expr, Variables);
 		[{Var_name, {fun_expr, _}}] -> infer_anonymus_func_app(Var_name, Arg_list_expr, Variables);
@@ -169,9 +167,9 @@ infer_anonymus_func_app(Var_name, Arg_list_expr, Variables) ->
 	Patterns = ?Query:exec(Clause, ?Clause:patterns()),
 	[Fun_expr_vars] = replace_clauses_params_with_args([Patterns], Arg_list),
 
-	A = replace_shadowed_vars_vals(Fun_expr_vars, Variables),
+	New_var_list = replace_shadowed_vars_vals(Fun_expr_vars, Variables),
 	
-	get_clause_type(Clause, A).
+	get_clause_type(Clause, New_var_list).
 
 replace_shadowed_vars_vals([], Vars) -> Vars;
 replace_shadowed_vars_vals([Anon_fun_var | Anon_fun_vars], Vars) ->
@@ -200,12 +198,10 @@ infer_internal_fun(Mod_name, Fun_name, Arg_list_expr, Parent_fun_variables) ->
 	Arg_list = lists:map(fun(Arg) -> infer_expr_inf(Arg, Parent_fun_variables) end, Arg_list_children),
 	Arity = length(Arg_list),
 	Actual_clauses_with_pats = find_actual_clauses(Mod_name, Fun_name, Arity, Arg_list_children),
-	erlang:display(Actual_clauses_with_pats),
 	Actual_clauses = lists:map(fun({Clause, _}) -> Clause end, Actual_clauses_with_pats),
 	Clauses_patterns = lists:map(fun({_, Pat}) -> Pat end, Actual_clauses_with_pats),
 	Variables = replace_clauses_params_with_args(Clauses_patterns, Arg_list),
 	Fun_type = get_clauses_type(Actual_clauses, Variables),
-	%erlang:display(Fun_type),
 
 	case length(Fun_type) of
 		1 -> hd(Fun_type);
@@ -459,8 +455,6 @@ convert_value_in_compound_format_to_basic({list, []}) ->
 	[];
 convert_value_in_compound_format_to_basic('...') -> 
 	'...';
-convert_value_in_compound_format_to_basic({Any_value, []}) ->
- 	undefinied;
 convert_value_in_compound_format_to_basic({Type, [Value]}) when is_integer(Type) or is_float(Type) or is_atom(Type) or is_boolean(Type) ->
 	Value;
 convert_value_in_compound_format_to_basic({variable, Value}) ->
@@ -470,18 +464,6 @@ convert_value_in_compound_format_to_basic({list, Values}) ->
 convert_value_in_compound_format_to_basic({tuple, Values}) ->
 	Tuple_elems_list = convert_values_in_compound_format_to_basic(Values),
 	list_to_tuple(Tuple_elems_list).
-
-get_compound_var_value(Var_expr, Variables) ->
-	Var_type = infer_var_type(Var_expr, Variables),
-
-	case Var_type of
-		{any, []} -> {variable, [undefinied]};
-		_         -> Var_type 
-	end.
-
-get_basic_var_value(Var_expr, Variables) ->
-	Compound_var_value = get_compound_var_value(Var_expr, Variables),
-	convert_value_in_compound_format_to_basic(Compound_var_value).
 
 get_path(Mod_name) ->
 	Mod = ?Query:exec(?Mod:find(Mod_name)),
@@ -558,8 +540,11 @@ compare_tuples(T1, T2) ->
 	end.
 
 compare_cons(Con1, Con2) ->
-	{list, List_elems1} = construct_list_from_cons_expr(Con1, []),
-	{list, List_elems2} = construct_list_from_cons_expr(Con2, []),
+	List_elems1 = construct_list_from_cons_expr(Con1, []),
+	List_elems2 = construct_list_from_cons_expr(Con2, []),
+
+	erlang:display(List_elems1),
+	erlang:display(List_elems2),
 
 	compare_lists_elems(List_elems1, List_elems2).
 
@@ -567,10 +552,6 @@ compare_simple_type(Pat, Par) ->
 	?Expr:value(Pat) =:= ?Expr:value(Par).
 
 compare_lists_elems(L, L) -> true;
-compare_lists_elems({list, []}, _)  ->
-	false;
-compare_lists_elems(_, {list, []})  ->
-	false;
 compare_lists_elems(['...'], _) ->
 	true;
 compare_lists_elems(_, ['...']) ->
@@ -584,7 +565,7 @@ compare_lists_elems([{variable, _} | T1], [_ | T2]) ->
 compare_lists_elems([_ | T1], [{variable, _} | T2]) ->
 	compare_lists_elems(T1, T2);
 compare_lists_elems([H1 | T1], [H2 | T2]) when erlang:is_list(H1) and erlang:is_list(H2) ->
-	compare_lists_elems(H1, H2) and compare_terms(T1, T2);
+	compare_lists_elems(H1, H2) and compare_lists_elems(T1, T2);
 compare_lists_elems([H1 | T1], [H2 | T2]) when erlang:is_tuple(H1) and erlang:is_tuple(H2) ->
 	Tuple1 = erlang:tuple_to_list(H1),
 	Tuple2 = erlang:tuple_to_list(H2),
@@ -611,7 +592,7 @@ extract_expr_vals([H | T], Variables) ->
 		cons -> [construct_list_from_cons_expr(H, Variables) | extract_expr_vals(T, Variables)];
 		list -> construct_list_from_list_expr(H, Variables) ++ extract_expr_vals(T, Variables);
 		tuple -> [construct_tuple(H, Variables) | extract_expr_vals(T, Variables)];
-		variable -> [get_basic_var_value(H, Variables) | extract_expr_vals(T, Variables)];
+		variable -> [{variable, ?Expr:value(H)} | extract_expr_vals(T, Variables)];
 		_        -> [?Expr:value(H) | extract_expr_vals(T, Variables)] 		
 	end.
 
@@ -620,7 +601,7 @@ extract_expr_val(Expr, Variables) ->
 		cons     -> construct_list_from_cons_expr(Expr, Variables);
 		list     -> construct_list_from_list_expr(Expr, Variables);
 		tuple    -> construct_tuple(Expr, Variables);
-		variable -> get_basic_var_value(Expr, Variables);
+		variable -> {variable, ?Expr:value(Expr)};
 		_        -> ?Expr:value(Expr)	
 	end.
 
