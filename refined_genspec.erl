@@ -62,7 +62,8 @@ find_actual_clauses(Mod_name, Fun_name, Arity, Actual_params) ->
 
 	case Actual_params of
 		[] -> 	Fun_def = Fun_def,
-				get_clauses(Fun_def);
+				[Clause] = get_clauses(Fun_def),
+				[{Clause, []}];
 		_  ->   find_actual_clause(Patterns, Actual_params)   
 	end.
 
@@ -83,13 +84,15 @@ infer_expr_inf(Expr, Variables) ->
 		Simple_type    -> infer_simple_type(Expr)
 	end.
 
-infer_implicit_fun_expr(Expr, Variables) ->
-	[Fun_info_expr, Arity_expr] = ?Query:exec(Expr, ?Expr:children()),
+infer_implicit_fun_expr(Implicit_fun_expr, Variables) ->
+	[Fun_info_expr, Arity_expr] = ?Query:exec(Implicit_fun_expr, ?Expr:children()),
 
 	case ?Expr:value(Fun_info_expr) of
-		':' -> 	[Mod_name_expr, Fun_name_expr] = ?Query:exec(Fun, ?Expr:children()),
-				{implicit_fun, {?Expr:value(Mod_name_expr), ?Expr:value(Fun_name_expr), ?Expr:value(Arity_expr)}};
-		_   ->  {implicit_fun, {current_mod, ?Expr:value(Fun_info_expr), ?Expr:value(Arity_expr)}}
+		':' -> 	[Mod_name_expr, Fun_name_expr] = ?Query:exec(Fun_info_expr, ?Expr:children()),
+				{implicit_fun, {{external_mod, ?Expr:value(Mod_name_expr)}, ?Expr:value(Fun_name_expr), ?Expr:value(Arity_expr)}};
+		_   ->  Function = ?Query:exec(Implicit_fun_expr, ?Expr:function()),
+				[Fun_mod] = ?Query:exec(Function, ?Fun:module()),
+				{implicit_fun, {{current_mod, ?Mod:name(Fun_mod)}, ?Expr:value(Fun_info_expr), ?Expr:value(Arity_expr)}}
 	end.
 
 infer_var_type(Expr, Variables) ->
@@ -123,7 +126,7 @@ infer_fun_app_type(Fun_app, Variables) ->
 			variable -> infer_anonymus_function(?Expr:value(Expr), Arg_list, Variables);
 			_        ->	case ?Expr:value(Expr) of
 							':'      -> [Module, Fun] = ?Query:exec(Expr, ?Expr:children()),
-										infer_external_fun(?Expr:value(Module), ?Expr:value(Fun), Arg_list);
+										infer_external_fun(?Expr:value(Module), ?Expr:value(Fun), Arg_list, Variables);
 							_        -> Function = ?Query:exec(Fun_app, ?Expr:function()),
 						                [Fun_mod] = ?Query:exec(Function, ?Fun:module()),
 										infer_internal_fun(?Mod:name(Fun_mod), ?Expr:value(Expr), Arg_list, Variables)
@@ -141,21 +144,23 @@ is_bounded(Variable_name, Variables) ->
 		_  -> true
 	end.
 
-infer_anonymus_function(Fun_name, Arg_list_expr, Variables) ->
-	case find_variable_by_name(Fun_name, Variables) of
-		[]                          -> infer_anonymus_func_app_without_body(Fun_name, Arg_list_expr, Variables);
-		[{Var_name, {fun_expr, _}}] -> infer_anonymus_func_app(Fun_name, Arg_list_expr, Variables);
-		[{Var_name, {implicit_fun, {current_mod, _Fun_name, _Arity}}}] -> infer_internal_fun()
+infer_anonymus_function(Var_name, Arg_list_expr, Variables) ->
+	erlang:display(Var_name),
+	case find_variable_by_name(Var_name, Variables) of
+		[]                          -> infer_anonymus_func_app_without_body(Arg_list_expr, Variables);
+		[{Var_name, {fun_expr, _}}] -> infer_anonymus_func_app(Var_name, Arg_list_expr, Variables);
+		[{Var_name, {implicit_fun, {{current_mod, Mod_name}, Fun_name, _Arity}}}] -> infer_internal_fun(Mod_name, Fun_name, Arg_list_expr, Variables);
+		[{Var_name, {implicit_fun, {{external_mod, Mod_name}, Fun_name, _Arity}}}] -> infer_external_fun(Mod_name, Fun_name, Arg_list_expr, Variables);
 		_                           -> {none, []}
 	end.
 
-infer_anonymus_func_app_without_body(Fun_name, Arg_list_expr, Variables) ->
+infer_anonymus_func_app_without_body(Arg_list_expr, Variables) ->
 	Arg_list_children = ?Query:exec(Arg_list_expr, ?Expr:children()),
 	Arg_list = lists:map(fun(Arg) -> infer_expr_inf(Arg, []) end, Arg_list_children),
 	{func, [Arg_list, [any]]}.
 
-infer_anonymus_func_app(Fun_name, Arg_list_expr, Variables) ->
-	[{_Var_name, {fun_expr, Fun_expr}}] = find_variable_by_name(Fun_name, Variables),
+infer_anonymus_func_app(Var_name, Arg_list_expr, Variables) ->
+	[{_Var_name, {fun_expr, Fun_expr}}] = find_variable_by_name(Var_name, Variables),
 	Arg_list_children = ?Query:exec(Arg_list_expr, ?Expr:children()),
 	Arg_list = lists:map(fun(Arg) -> infer_expr_inf(Arg, Variables) end, Arg_list_children),
 
@@ -164,10 +169,7 @@ infer_anonymus_func_app(Fun_name, Arg_list_expr, Variables) ->
 	Patterns = ?Query:exec(Clause, ?Clause:patterns()),
 	[Fun_expr_vars] = replace_clauses_params_with_args([Patterns], Arg_list),
 
-	erlang:display(Fun_expr_vars),
-	erlang:display(Variables),
 	A = replace_shadowed_vars_vals(Fun_expr_vars, Variables),
-	erlang:display(A),
 	
 	get_clause_type(Clause, A).
 
@@ -183,18 +185,22 @@ replace_shadowed_vars_val({Var_name, Value1}, [{Var_name, Value2} | Vars], New_v
 replace_shadowed_vars_val(Anon_fun_var, [Var | Vars], New_var_list) ->
 	replace_shadowed_vars_val(Anon_fun_var, Vars, [Var | New_var_list]).
 
-infer_external_fun(Mod_name, Fun_name, Arg_list_expr) ->
+infer_external_fun(Mod_name, Fun_name, Arg_list_expr, Variables) ->
 	Arg_list = ?Query:exec(Arg_list_expr, ?Expr:children()),
-	Args = ?Query:exec(Arg_list, ?Expr:children()),
-	Arity = length(Args),
-	{_, [Return_type]} = spec_proc:get_spec_type(Mod_name, Fun_name, Arity),
-	Return_type.
+	Arity = length(Arg_list),
+	Spec_info = spec_proc:get_spec_type(Mod_name, Fun_name, Arity),
+
+	case Spec_info of
+		{_, [Return_type]} -> Return_type;
+		[] -> infer_internal_fun(Mod_name, Fun_name, Arg_list_expr, Variables)
+	end.
 
 infer_internal_fun(Mod_name, Fun_name, Arg_list_expr, Parent_fun_variables) ->
 	Arg_list_children = ?Query:exec(Arg_list_expr, ?Expr:children()),
 	Arg_list = lists:map(fun(Arg) -> infer_expr_inf(Arg, Parent_fun_variables) end, Arg_list_children),
 	Arity = length(Arg_list),
 	Actual_clauses_with_pats = find_actual_clauses(Mod_name, Fun_name, Arity, Arg_list_children),
+	erlang:display(Actual_clauses_with_pats),
 	Actual_clauses = lists:map(fun({Clause, _}) -> Clause end, Actual_clauses_with_pats),
 	Clauses_patterns = lists:map(fun({_, Pat}) -> Pat end, Actual_clauses_with_pats),
 	Variables = replace_clauses_params_with_args(Clauses_patterns, Arg_list),
