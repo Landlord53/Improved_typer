@@ -20,12 +20,12 @@ af3() ->
 
 af3_2() ->
 	%Для данного теста нужно создать модуль external_module и добавить функцию sum
-	Af = fun spec_test:sum2/2,
+	Af = fun unit_test2:sum2/2,
 	Af(1,2).
 
 af3_3() ->
 	%Для данного теста нужно создать модуль external_module и добавить функцию sum со спецификацией
-	Af = fun spec_test:sum/2,
+	Af = fun unit_test2:sum/2,
 	Af(1,2).
 
 af4() ->
@@ -95,4 +95,12 @@ ei3() ->
 	A = [1,2],
 	B = [3,4],
 	{A, B}.
+
+ei4() ->
+	A = [1,2],
+	[1 | A].
+
+ei5() ->
+	A = 1,
+	[A | 2].
 	

@@ -244,57 +244,64 @@ bound_a_single_var(Variable, Value, Variables) ->
 		false -> {?Expr:value(Variable), infer_expr_inf(Value, Variables)}
 	end.	
 
-compare_types(Type, Type) ->
+%-spec is_subset(Set, Subset) -> boolean.
+
+are_matched_types(Type, Type) ->
 	true;
-compare_types({any, _Val1}, _Type2) ->
+
+are_matched_types({any, _Val1}, _Type2) ->
 	true;
-compare_types(_Type1, {any, _Val2}) ->
+are_matched_types(_Type1, {any, _Val2}) ->
 	true;
-compare_types({number, _Val1}, {Type2, _Val2}) when ((Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) or (Type2 == float) or (Type2 == number)) ->
+
+are_matched_types({number, _Val1}, {Type2, _Val2}) when ((Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) or (Type2 == float) or (Type2 == number)) ->
 	true;
-compare_types({Type1, _Val1}, {number, _Val2}) when ((Type1 == neg_integer) or (Type1 == pos_integer) or (Type1 == non_neg_integer) or (Type1 == integer) or (Type1 == float) or (Type1 == number)) ->
+are_matched_types({Type1, _Val1}, {number, _Val2}) when ((Type1 == neg_integer) or (Type1 == pos_integer) or (Type1 == non_neg_integer) or (Type1 == integer) or (Type1 == float) or (Type1 == number)) ->
 	true;
-compare_types({Type1, [Value]}, {Type2, [Value]}) when ((Type1 == neg_integer) or (Type1 == pos_integer) or (Type1 == non_neg_integer) or (Type1 == integer)) and
-													   ((Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer)) ->
+
+are_matched_types({Type1, [Value]}, {Type2, [Value]}) when is_number(Value) ->
 	true;
-compare_types({Type1, [Value]}, {Type2, []}) when ((Type1 == neg_integer) or (Type1 == integer)) and
-												  ((Type2 == neg_integer) or (Type2 == integer)) ->
+
+are_matched_types({neg_integer, [Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == integer) ->
 	true;
-compare_types({Type1, []}, {Type2, [Value]}) when ((Type1 == neg_integer) or (Type1 == integer)) and
-												  ((Type2 == neg_integer) or (Type2 == integer)) ->
+are_matched_types({pos_integer, [Value]}, {Type2, []}) when (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
 	true;
-compare_types({Type1, []}, {Type2, []}) when ((Type1 == neg_integer) or (Type1 == integer)) and
-										     ((Type2 == neg_integer) or (Type2 == integer)) ->
+are_matched_types({non_neg_integer, [Value]}, {Type2, []}) when (Type2 == non_neg_integer) or (Type2 == integer) ->
 	true;
-compare_types({Type1, [Value]}, {Type2, []}) when ((Type1 == pos_integer) or (Type1 == integer)) and
-												  ((Type2 == pos_integer) or (Type2 == integer)) ->
+are_matched_types({integer, [Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
 	true;
-compare_types({Type1, []}, {Type2, [Value]}) when ((Type1 == pos_integer) or (Type1 == integer)) and
-												  ((Type2 == pos_integer) or (Type2 == integer)) ->
+
+are_matched_types({Type1, []}, {neg_integer, [Value]}) when (Type1 == neg_integer) or (Type1 == integer) ->
 	true;
-compare_types({Type1, []}, {Type2, []}) when ((Type1 == pos_integer) or (Type1 == integer)) and
-										     ((Type2 == pos_integer) or (Type2 == integer)) ->
+are_matched_types({Type1, []}, {pos_integer, [Value]}) when (Type1 == pos_integer) or (Type1 == non_neg_integer) or (Type1 == integer) ->
 	true;
-compare_types({Type1, [Value]}, {Type2, []}) when ((Type1 == non_neg_integer) or (Type1 == pos_integer) or (Type1 == integer)) and
-												  ((Type2 == non_neg_integer) or (Type2 == pos_integer) or (Type2 == integer)) ->
+are_matched_types({Type1, []}, {non_neg_integer, [Value]}) when (Type1 == non_neg_integer) or (Type1 == integer) ->
 	true;
-compare_types({Type1, []}, {Type2, [Value]}) when ((Type1 == non_neg_integer) or (Type1 == pos_integer) or (Type1 == integer)) and
-												  ((Type2 == non_neg_integer) or (Type2 == pos_integer) or (Type2 == integer)) ->
+are_matched_types({Type1, []}, {integer, [Value]}) when (Type1 == neg_integer) or (Type1 == pos_integer) or (Type1 == non_neg_integer) or (Type1 == integer) ->
 	true;
-compare_types({Type1, []}, {Type2, []}) when ((Type1 == non_neg_integer) or (Type1 == pos_integer) or (Type1 == integer)) and
-											 ((Type2 == non_neg_integer) or (Type2 == pos_integer) or (Type2 == integer)) ->
+
+are_matched_types({neg_integer, [Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == integer) ->
 	true;
-compare_types({Type, [Value]}, {Type, []}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun) ->
+are_matched_types({pos_integer, [Value]}, {Type2, []}) when (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
 	true;
-compare_types({Type, []}, {Type, [Value]}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun)->
+are_matched_types({non_neg_integer, [Value]}, {Type2, []}) when (Type2 == non_neg_integer) or (Type2 == integer) ->
 	true;
-compare_types({Type, []}, {Type, []}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun)->
+are_matched_types({integer, [Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
+	true;	
+
+
+are_matched_types({Type, [Value]}, {Type, []}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun) ->
 	true;
-compare_types('...', Type) ->
+are_matched_types({Type, []}, {Type, [Value]}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun)->
 	true;
-compare_types(Type, '...') ->
+are_matched_types({Type, []}, {Type, []}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun)->
 	true;
-compare_types({list, Vals1}, {list, Vals2}) ->
+
+are_matched_types('...', Type) ->
+	true;
+are_matched_types(Type, '...') ->
+	true;
+are_matched_types({list, Vals1}, {list, Vals2}) ->
 	ok.
 
 compare_lists_in_compound_format(['...'], Type2) ->
@@ -302,7 +309,7 @@ compare_lists_in_compound_format(['...'], Type2) ->
 compare_lists_in_compound_format(Type1, ['...']) ->
 	true;
 compare_lists_in_compound_format([H1 | T1], [H2 | T2]) ->
-	compare_types(H1, H2) and compare_lists_in_compound_format(T1, T2).
+	are_matched_types(H1, H2) and compare_lists_in_compound_format(T1, T2).
 
 infer_infix_expr_type(Expr, Operation, Variables) ->
 	[Sub_expr1, Sub_expr2] = get_children(Expr),
@@ -469,7 +476,7 @@ convert_values_in_basic_format_to_compound([]) -> [];
 convert_values_in_basic_format_to_compound([H | T]) ->
 	[convert_value_in_basic_format_to_compound(H) | convert_values_in_basic_format_to_compound(T)];
 convert_values_in_basic_format_to_compound(Value) ->
-	Value.
+	convert_value_in_basic_format_to_compound(Value).
 
 convert_value_in_basic_format_to_compound([]) -> 
 	[];
@@ -495,7 +502,9 @@ convert_value_in_basic_format_to_compound(Value) when is_tuple(Value) ->
 
 convert_values_in_compound_format_to_basic([]) -> [];
 convert_values_in_compound_format_to_basic([H | T]) ->
-	[convert_value_in_compound_format_to_basic(H) | convert_values_in_compound_format_to_basic(T)].
+	[convert_value_in_compound_format_to_basic(H) | convert_values_in_compound_format_to_basic(T)];
+convert_values_in_compound_format_to_basic(Value) ->
+	convert_value_in_compound_format_to_basic(Value).
 
 convert_value_in_compound_format_to_basic({list, []}) -> 
 	[];
@@ -624,6 +633,9 @@ extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Variables)
 	Left_cons_expr_list = extract_expr_val(Left_cons_expr, Variables),
 	Right_cons_expr_list = extract_expr_val(Right_cons_expr, Variables),
 
+	%erlang:display(Right_cons_expr_list),
+	%erlang:display(Left_cons_expr_list),
+
 	case Right_cons_expr_list of
 		{list, []}    -> Left_cons_expr_list;
 		{variable, _} -> Left_cons_expr_list ++ ['...'];
@@ -645,7 +657,7 @@ extract_expr_val(Expr, Variables) ->
 		list     -> construct_list_from_list_expr(Expr, Variables);
 		tuple    -> construct_tuple(Expr, Variables);
 		variable -> define_var_value(Expr, Variables);
-		_        -> ?Expr:value(Expr)	
+		_        -> ?Expr:value(Expr)
 	end.
 
 define_var_value(Var_expr, Variables) ->
@@ -778,7 +790,13 @@ test() ->
 	erlang:display({test14, ei2, Test14 == [{list,[{integer,[1]},{integer,[2]},{list,[{integer,[1]},{integer,[2]},{integer,[3]}]}]}]}),
 
 	Test15 = infer_fun_type(unit_test, ei3, 0, []),
-	erlang:display({test15, ei3, Test15 == [{tuple,[{list,[{integer,[1]},{integer,[2]}]},{list,[{integer,[3]},{integer,[4]}]}]}]}).
+	erlang:display({test15, ei3, Test15 == [{tuple,[{list,[{integer,[1]},{integer,[2]}]},{list,[{integer,[3]},{integer,[4]}]}]}]}),
+
+	Test16 = infer_fun_type(unit_test, ei4, 0, []),
+	erlang:display({test16, ei4, Test16 == [{list,[{integer,[1]},{integer,[1]},{integer,[2]}]}]}),
+
+	Test17 = infer_fun_type(unit_test, ei5, 0, []),
+	erlang:display({test17, ei5, Test17 == [{list,[{integer,[1]}|{integer,[2]}]}]}).
 
 
 
