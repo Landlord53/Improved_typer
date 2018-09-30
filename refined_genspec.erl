@@ -7,11 +7,10 @@
 %2)Process fun expressions  (В разделе "Defining actual clauses")
 %3)Добавить проверку, что если паттерн абсолютно совпадает с actual parameters, не проверять дальше.
 %4)Функция get_fun_name не обрабатывает случай, когда можду именем функции и скобками есть пробелы.
-%5)Добавить ":" d infix expressions.
 %6)Добавить обработку случая, когда нет actual clauses для функции infer_internal_fun.
 %7)Добавить обработку случая, для выражений типо [1,2 | B] = SomeList, а так же когда аргумент функции паттерматчат к дкакому-либо значению.
 %8)Обрадотать случай, когда последнее выражение фнкции - funxepression.
-
+%10)Добавить обрабокту случая вызова функция внутри листво и таплов
 
 -include("user.hrl").
 -include("spec.hrl").
@@ -244,72 +243,62 @@ bound_a_single_var(Variable, Value, Variables) ->
 		false -> {?Expr:value(Variable), infer_expr_inf(Value, Variables)}
 	end.	
 
-%-spec is_subset(Set, Subset) -> boolean.
-
-are_matched_types(Type, Type) ->
+are_matching_types(Type, Type) ->
 	true;
 
-are_matched_types({any, _Val1}, _Type2) ->
+are_matching_types({any, _Val1}, _Type2) ->
 	true;
-are_matched_types(_Type1, {any, _Val2}) ->
-	true;
-
-are_matched_types({number, _Val1}, {Type2, _Val2}) when ((Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) or (Type2 == float) or (Type2 == number)) ->
-	true;
-are_matched_types({Type1, _Val1}, {number, _Val2}) when ((Type1 == neg_integer) or (Type1 == pos_integer) or (Type1 == non_neg_integer) or (Type1 == integer) or (Type1 == float) or (Type1 == number)) ->
+are_matching_types(_Type1, {any, _Val2}) ->
 	true;
 
-are_matched_types({Type1, [Value]}, {Type2, [Value]}) when is_number(Value) ->
+are_matching_types({number, _Val1}, {Type2, _Val2}) when ((Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) or (Type2 == float) or (Type2 == number)) ->
+	true;
+are_matching_types({Type1, _Val1}, {number, _Val2}) when ((Type1 == neg_integer) or (Type1 == pos_integer) or (Type1 == non_neg_integer) or (Type1 == integer) or (Type1 == float) or (Type1 == number)) ->
 	true;
 
-are_matched_types({neg_integer, [Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == integer) ->
-	true;
-are_matched_types({pos_integer, [Value]}, {Type2, []}) when (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
-	true;
-are_matched_types({non_neg_integer, [Value]}, {Type2, []}) when (Type2 == non_neg_integer) or (Type2 == integer) ->
-	true;
-are_matched_types({integer, [Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
+are_matching_types({Type1, [Value]}, {Type2, [Value]}) when is_number(Value) ->
 	true;
 
-are_matched_types({Type1, []}, {neg_integer, [Value]}) when (Type1 == neg_integer) or (Type1 == integer) ->
+are_matching_types({neg_integer, [Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == integer) ->
 	true;
-are_matched_types({Type1, []}, {pos_integer, [Value]}) when (Type1 == pos_integer) or (Type1 == non_neg_integer) or (Type1 == integer) ->
+are_matching_types({pos_integer, [Value]}, {Type2, []}) when (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
 	true;
-are_matched_types({Type1, []}, {non_neg_integer, [Value]}) when (Type1 == non_neg_integer) or (Type1 == integer) ->
+are_matching_types({non_neg_integer, [Value]}, {Type2, []}) when (Type2 == non_neg_integer) or (Type2 == integer) ->
 	true;
-are_matched_types({Type1, []}, {integer, [Value]}) when (Type1 == neg_integer) or (Type1 == pos_integer) or (Type1 == non_neg_integer) or (Type1 == integer) ->
+are_matching_types({integer, [Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
 	true;
 
-are_matched_types({neg_integer, [Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == integer) ->
+are_matching_types({Type1, []}, {neg_integer, [Value]}) when (Type1 == neg_integer) or (Type1 == integer) ->
 	true;
-are_matched_types({pos_integer, [Value]}, {Type2, []}) when (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
+are_matching_types({Type1, []}, {pos_integer, [Value]}) when (Type1 == pos_integer) or (Type1 == non_neg_integer) or (Type1 == integer) ->
 	true;
-are_matched_types({non_neg_integer, [Value]}, {Type2, []}) when (Type2 == non_neg_integer) or (Type2 == integer) ->
+are_matching_types({Type1, []}, {non_neg_integer, [Value]}) when (Type1 == non_neg_integer) or (Type1 == integer) ->
 	true;
-are_matched_types({integer, [Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
+are_matching_types({Type1, []}, {integer, [Value]}) when (Type1 == neg_integer) or (Type1 == pos_integer) or (Type1 == non_neg_integer) or (Type1 == integer) ->
+	true;
+
+are_matching_types({neg_integer, [Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == integer) ->
+	true;
+are_matching_types({pos_integer, [Value]}, {Type2, []}) when (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
+	true;
+are_matching_types({non_neg_integer, [Value]}, {Type2, []}) when (Type2 == non_neg_integer) or (Type2 == integer) ->
+	true;
+are_matching_types({integer, [Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
 	true;	
 
 
-are_matched_types({Type, [Value]}, {Type, []}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun) ->
+are_matching_types({Type, [Value]}, {Type, []}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun) ->
 	true;
-are_matched_types({Type, []}, {Type, [Value]}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun)->
+are_matching_types({Type, []}, {Type, [Value]}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun)->
 	true;
-are_matched_types({Type, []}, {Type, []}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun)->
+are_matching_types({Type, []}, {Type, []}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun)->
 	true;
 
-are_matched_types('...', Type) ->
-	true;
-are_matched_types(Type, '...') ->
-	true;
-are_matched_types({list, Vals1}, {list, Vals2}) ->
-	ok.
+are_matching_types({list, Vals1}, {list, Vals2}) ->
+	.
 
-compare_lists_in_compound_format(['...'], Type2) ->
-	true;
-compare_lists_in_compound_format(Type1, ['...']) ->
-	true;
-compare_lists_in_compound_format([H1 | T1], [H2 | T2]) ->
-	are_matched_types(H1, H2) and compare_lists_in_compound_format(T1, T2).
+are_matching_lists({}) ->
+	
 
 infer_infix_expr_type(Expr, Operation, Variables) ->
 	[Sub_expr1, Sub_expr2] = get_children(Expr),
@@ -472,16 +461,21 @@ compute_infix_expr(_A, _B, _Operation) ->
 	{none, []}.
 
 %---------------------------------Helper functions---------------------------------------------
-convert_values_in_basic_format_to_compound([]) -> [];
-convert_values_in_basic_format_to_compound([H | T]) ->
-	[convert_value_in_basic_format_to_compound(H) | convert_values_in_basic_format_to_compound(T)];
-convert_values_in_basic_format_to_compound(Value) ->
-	convert_value_in_basic_format_to_compound(Value).
+convert_list_values_in_basic_format_to_compound([], Converted_values) -> {defined_list, lists:reverse(Converted_values)};
+convert_list_values_in_basic_format_to_compound(['...'], Converted_values) ->
+	{undefined_list, lists:reverse(['...' | Converted_values])};
+convert_list_values_in_basic_format_to_compound([H | T], Converted_values) ->
+	Converted_value = convert_value_in_basic_format_to_compound(H),
+	convert_list_values_in_basic_format_to_compound(T, [Converted_value | Converted_values]);
+convert_list_values_in_basic_format_to_compound(Value, Converted_values) ->
+	Converted_value = convert_value_in_basic_format_to_compound(Value),
+	Reversed_values = lists:reverse(Converted_values),
+	{improper_list, Converted_values ++ Converted_value}.
 
 convert_value_in_basic_format_to_compound([]) -> 
 	[];
-convert_value_in_basic_format_to_compound({list, []}) -> 
-	{list, []};
+convert_value_in_basic_format_to_compound({empty_list, []}) -> 
+	{empty_list, []};
 convert_value_in_basic_format_to_compound('...') -> 
 	'...';
 convert_value_in_basic_format_to_compound(Value) when is_integer(Value)->
@@ -495,18 +489,22 @@ convert_value_in_basic_format_to_compound(Value) when is_boolean(Value) ->
 convert_value_in_basic_format_to_compound({variable, Value}) ->
 	{variable, Value};
 convert_value_in_basic_format_to_compound(Value) when is_list(Value) ->
-	{list, convert_values_in_basic_format_to_compound(Value)};
+	Values_list = convert_list_values_in_basic_format_to_compound(Value, []),
+	convert_list_values_in_basic_format_to_compound(Value, []);
 convert_value_in_basic_format_to_compound(Value) when is_tuple(Value) ->
 	Tuple_elems_list = tuple_to_list(Value),
-	{tuple, convert_values_in_basic_format_to_compound(Tuple_elems_list)}.
+	{_, Elems_in_compound_format} = convert_list_values_in_basic_format_to_compound(Tuple_elems_list, []),
+	{tuple, Elems_in_compound_format}.
 
 convert_values_in_compound_format_to_basic([]) -> [];
+convert_values_in_compound_format_to_basic({empty_list, []}) ->
+	{empty_list, []};
 convert_values_in_compound_format_to_basic([H | T]) ->
 	[convert_value_in_compound_format_to_basic(H) | convert_values_in_compound_format_to_basic(T)];
 convert_values_in_compound_format_to_basic(Value) ->
 	convert_value_in_compound_format_to_basic(Value).
 
-convert_value_in_compound_format_to_basic({list, []}) -> 
+convert_value_in_compound_format_to_basic({empty_list, []}) -> 
 	[];
 convert_value_in_compound_format_to_basic('...') -> 
 	'...';
@@ -514,7 +512,7 @@ convert_value_in_compound_format_to_basic({Type, [Value]}) when is_integer(Type)
 	Value;
 convert_value_in_compound_format_to_basic({variable, Value}) ->
 	{variable, Value};
-convert_value_in_compound_format_to_basic({list, Values}) ->
+convert_value_in_compound_format_to_basic({List_type, Values}) when (List_type == defined_list) or (List_type == undefined_list) or (List_type == improper_list) ->
 	convert_values_in_compound_format_to_basic(Values);
 convert_value_in_compound_format_to_basic({tuple, Values}) ->
 	Tuple_elems_list = convert_values_in_compound_format_to_basic(Values),
@@ -637,7 +635,7 @@ extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Variables)
 	%erlang:display(Left_cons_expr_list),
 
 	case Right_cons_expr_list of
-		{list, []}    -> Left_cons_expr_list;
+		{empty_list, []}    -> Left_cons_expr_list;
 		{variable, _} -> Left_cons_expr_list ++ ['...'];
 		_             -> Left_cons_expr_list ++ Right_cons_expr_list
 	end;
@@ -678,7 +676,7 @@ construct_list_from_cons_expr(Cons, Variables) ->
 	Children = ?Query:exec(Cons, ?Expr:children()),
 
 	case length(Children) of
-		0 -> {list, []};
+		0 -> {empty_list, []};
 		1 -> extract_expr_vals(Children, Variables);
 		2 -> [Left_cons_expr, Right_cons_expr] = Children,
 			 extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Variables)
@@ -784,19 +782,22 @@ test() ->
 	erlang:display({test12, lfac7_7, Test12 == [{atom,[ok]}]}),
 
 	Test13 = infer_fun_type(unit_test, ei1, 0, []),
-	erlang:display({test13, ei1, Test13 == [{list,[{integer,[1]},{integer,[2]},{integer,[4]}]}]}),
+	erlang:display({test13, ei1, Test13 == [{defined_list,[{integer,[1]},{integer,[2]},{integer,[4]}]}]}),
 
 	Test14 = infer_fun_type(unit_test, ei2, 0, []),
-	erlang:display({test14, ei2, Test14 == [{list,[{integer,[1]},{integer,[2]},{list,[{integer,[1]},{integer,[2]},{integer,[3]}]}]}]}),
+	erlang:display({test14, ei2, Test14 == [{defined_list,[{integer,[1]},{integer,[2]},{defined_list,[{integer,[1]},{integer,[2]},{integer,[3]}]}]}]}),
 
 	Test15 = infer_fun_type(unit_test, ei3, 0, []),
-	erlang:display({test15, ei3, Test15 == [{tuple,[{list,[{integer,[1]},{integer,[2]}]},{list,[{integer,[3]},{integer,[4]}]}]}]}),
+	erlang:display({test15, ei3, Test15 == [{tuple,[{defined_list,[{integer,[1]},{integer,[2]}]},{defined_list,[{integer,[3]},{integer,[4]}]}]}]}),
 
 	Test16 = infer_fun_type(unit_test, ei4, 0, []),
-	erlang:display({test16, ei4, Test16 == [{list,[{integer,[1]},{integer,[1]},{integer,[2]}]}]}),
+	erlang:display({test16, ei4, Test16 == [{defined_list,[{integer,[1]},{integer,[1]},{integer,[2]}]}]}),
 
 	Test17 = infer_fun_type(unit_test, ei5, 0, []),
-	erlang:display({test17, ei5, Test17 == [{list,[{integer,[1]}|{integer,[2]}]}]}).
+	erlang:display({test17, ei5, Test17 == [{improper_list,[{integer,[1]}|{integer,[2]}]}]}),
+
+	Test18 = infer_fun_type(unit_test, ei6, 1, []),
+	erlang:display({test18, ei6, Test18 == [{undefined_list,[{integer,[1]}, {integer,[2]}, {integer,[3]}, '...']}]}).
 
 
 
