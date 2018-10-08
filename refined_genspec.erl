@@ -11,6 +11,7 @@
 %7)Добавить обработку случая, для выражений типо [1,2 | B] = SomeList, а так же когда аргумент функции паттерматчат к дкакому-либо значению.
 %8)Обрадотать случай, когда последнее выражение фнкции - funxepression.
 %10)Добавить обрабокту случая вызова функция внутри листво и таплов
+%11)Когда при присваивании на левой стороне стоит пременная с типом any а на правой переменная с каким-то более точным значением, присвоить переменной слева это значение
 
 -include("user.hrl").
 -include("spec.hrl").
@@ -225,23 +226,44 @@ infer_parenthesis_inf(Expr, Variables) ->
 infer_match_expr_inf(Expr, Variables) ->
 	[Left_side, Right_side] = get_children(Expr),
 
-%	case ?Expr:type(Left_side) of
-%		variable -> bound_a_single_var(Left_side, Right_side, Variables)
-%	end.
+	erlang:display(?Expr:type(Left_side)),
 
-	{?Expr:value(Left_side), infer_expr_inf(Right_side, Variables)}.
+	case ?Expr:type(Left_side) of
+		variable -> bound_a_single_var(Left_side, Right_side, Variables);
+		cons     -> bound_cons(Left_side, Right_side, Variables)
+	end.
 
-bound_a_single_var(Variable, Value, Variables) ->
-	Is_bounded = is_bounded(Variable, Variables),	
+%	{?Expr:value(Left_side), infer_expr_inf(Right_side, Variables)}.
+
+bound_a_single_var(Right_side_expr, Left_side_expr, Variables) ->
+	Right_var_name = ?Expr:value(Right_side_expr),
+	Is_bounded = is_bounded(Right_var_name, Variables),
+	
 
 	case Is_bounded of
-		true  -> Variable1_type = infer_expr_inf(Variable, Variables),
-				 Variable2_type = infer_expr_inf(Value, Variables);
+		true  -> Variable1_type = infer_expr_inf(Right_side_expr, Variables),
+				 Variable2_type = infer_expr_inf(Left_side_expr, Variables),
 
-
-
-		false -> {?Expr:value(Variable), infer_expr_inf(Value, Variables)}
+				 case are_matching_types(Variable1_type, Variable2_type) of
+				 	true -> {?Expr:value(Right_side_expr), Variable1_type};
+				 	false -> {none, []}
+				 end;
+		false -> {?Expr:value(Right_side_expr), infer_expr_inf(Left_side_expr, Variables)}
 	end.	
+
+bound_cons(Left_side, Right_side, Variables) ->
+	Left_side_type = infer_expr_inf(Left_side, Variables),
+	Right_side_type = infer_expr_inf(Right_side, Variables),
+
+	Are_matching_types = are_matching_types(Left_side_type, Right_side_type),
+
+	case Are_matching_types of
+		true -> bound_cons_elems(Left_side_type, Right_side_type);
+		false -> {none, []}
+	end.
+
+bound_cons_elems(Left_side_type, Right_side_type) ->
+	
 
 are_matching_types(Type, Type) ->
 	true;
@@ -287,6 +309,8 @@ are_matching_types({integer, [Value]}, {Type2, []}) when (Type2 == neg_integer) 
 	true;	
 
 
+are_matching_types({Type, [Value1]}, {Type, [Value2]}) when Value1 == Value2 ->
+	true;
 are_matching_types({Type, [Value]}, {Type, []}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun) ->
 	true;
 are_matching_types({Type, []}, {Type, [Value]}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun)->
@@ -294,11 +318,53 @@ are_matching_types({Type, []}, {Type, [Value]}) when (Type == float) or (Type ==
 are_matching_types({Type, []}, {Type, []}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun)->
 	true;
 
-are_matching_types({list, Vals1}, {list, Vals2}) ->
-	.
+are_matching_types({Type1, Vals1}, {Type2, Vals2}) when ((Type1 == defined_list) or (Type1 == undefined_list) or (Type1 == improper_list)) and
+														((Type2 == defined_list) or (Type2 == undefined_list) or (Type2 == improper_list)) ->
+	are_matching_lists({Type1, Vals1}, {Type2, Vals2});
 
-are_matching_lists({}) ->
-	
+are_matching_types(Type1, Type2) ->
+	false.
+
+are_matching_lists(List, List) ->
+	true;
+are_matching_lists({empty_list, []}, {undefined_list, [Val]}) ->
+	true;
+are_matching_lists({undefined_list, [Val]}, {empty_list, []}) ->
+	true;
+are_matching_lists(List1, List2) ->
+	are_lists_elems_matching(List1, List2).
+
+
+are_lists_elems_matching({Type1, []}, {Type2, []}) ->
+	true;
+are_lists_elems_matching({defined_list, [Elem1 | Elems1]}, {defined_list, [Elem2 | Elems2]}) ->
+	are_matching_types(Elem1, Elem2) and are_lists_elems_matching({defined_list, Elems1}, {defined_list, Elems2});
+
+are_lists_elems_matching({defined_list, [Elem1 | Elems1]}, {undefined_list, [Elem2 | Elems2]}) ->
+	are_matching_types(Elem1, Elem2) and are_lists_elems_matching({defined_list, Elems1}, {undefined_list, Elems2});
+are_lists_elems_matching({undefined_list, [Elem1 | Elems1]}, {defined_list, [Elem2 | Elems2]}) ->
+	are_matching_types(Elem1, Elem2) and are_lists_elems_matching({undefined_list, Elems1}, {defined_list, Elems2});
+
+are_lists_elems_matching({Type1, Elems1}, {undefined_list, ['...']}) ->
+	true;
+are_lists_elems_matching({undefined_list, ['...']}, {Type2, Elems2}) ->
+	true;
+
+are_lists_elems_matching({List1_type, [Elem1 | Elems1]}, {undefined_list, [Elem2]}) ->
+	are_matching_types(Elem1, Elem2);
+are_lists_elems_matching({undefined_list, [Elem1]}, {List2_type, [Elem2 | Elems2]}) ->
+	are_matching_types(Elem1, Elem2);
+
+are_lists_elems_matching({undefined_list, [Elem1 | Elems1]}, {undefined_list, [Elem2 | Elems2]}) ->
+	are_matching_types(Elem1, Elem2) and are_lists_elems_matching(Elems1, Elems2);
+
+are_lists_elems_matching({Type1, [Elem1 | Elems1]}, {Type2, []}) ->
+	false;
+are_lists_elems_matching({Type1, []}, {Type2, [Elem2 | Elems2]}) ->
+	false.
+
+
+
 
 infer_infix_expr_type(Expr, Operation, Variables) ->
 	[Sub_expr1, Sub_expr2] = get_children(Expr),
