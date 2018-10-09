@@ -106,3 +106,15 @@ ei5() ->
 	
 ei6(A) ->
 	[1,2,3 | A].
+
+%Pattern matching tests
+
+pm() ->
+	B = [1,2,3],
+	[A, C, 3] = B,
+	A + C.
+
+pm2() ->
+	A = 5,
+	[A | B] = [5, 1, 2],
+	B.	

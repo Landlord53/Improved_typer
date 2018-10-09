@@ -12,6 +12,8 @@
 %8)Обрадотать случай, когда последнее выражение фнкции - funxepression.
 %10)Добавить обрабокту случая вызова функция внутри листво и таплов
 %11)Когда при присваивании на левой стороне стоит пременная с типом any а на правой переменная с каким-то более точным значением, присвоить переменной слева это значение
+%12)Улучшить обработку случая типа bound_cons_elems({List_type1, [{'...', [Value]} | Elems1]}, {undefined_list, [{'...', [Value]} | Elems2]}).Так как я не знаю тип элемента до {'...', [Value]} пришлось поставить просто any.
+
 
 -include("user.hrl").
 -include("spec.hrl").
@@ -48,8 +50,11 @@ define_bodies_type([Last_body], Variables) ->
 define_bodies_type([Body | Bodies], Variables) ->
 	Body_type = infer_expr_inf(Body, Variables),
 
+	%erlang:display(Body_type),
+
 	case Body_type of
 		{_Var_name, {_Type, _Value}} -> define_bodies_type(Bodies, [Body_type | Variables]);
+		Type when is_list(Type) -> define_bodies_type(Bodies, Body_type ++ Variables);
 		_                  -> define_bodies_type(Bodies, Variables)
 	end.
 
@@ -224,46 +229,69 @@ infer_parenthesis_inf(Expr, Variables) ->
 	infer_expr_inf(Child, Variables).
 
 infer_match_expr_inf(Expr, Variables) ->
-	[Left_side, Right_side] = get_children(Expr),
+	[Leftside_expr, Rightside_expr] = get_children(Expr),
 
-	erlang:display(?Expr:type(Left_side)),
+	%erlang:display(?Expr:type(Leftside_expr)),
 
-	case ?Expr:type(Left_side) of
-		variable -> bound_a_single_var(Left_side, Right_side, Variables);
-		cons     -> bound_cons(Left_side, Right_side, Variables)
+	case ?Expr:type(Leftside_expr) of
+		variable -> bound_a_single_var(Leftside_expr, Rightside_expr, Variables);
+		cons     -> bound_cons(Leftside_expr, Rightside_expr, Variables)
 	end.
 
-%	{?Expr:value(Left_side), infer_expr_inf(Right_side, Variables)}.
+	%{?Expr:value(Leftside_expr), infer_expr_inf(Rightside_expr, Variables)}.
 
-bound_a_single_var(Right_side_expr, Left_side_expr, Variables) ->
-	Right_var_name = ?Expr:value(Right_side_expr),
+bound_a_single_var(Rightside_expr, Leftside_expr, Variables) ->
+	Right_var_name = ?Expr:value(Rightside_expr),
 	Is_bounded = is_bounded(Right_var_name, Variables),
 	
 
 	case Is_bounded of
-		true  -> Variable1_type = infer_expr_inf(Right_side_expr, Variables),
-				 Variable2_type = infer_expr_inf(Left_side_expr, Variables),
+		true  -> Variable1_type = infer_expr_inf(Rightside_expr, Variables),
+				 Variable2_type = infer_expr_inf(Leftside_expr, Variables),
 
 				 case are_matching_types(Variable1_type, Variable2_type) of
-				 	true -> {?Expr:value(Right_side_expr), Variable1_type};
+				 	true -> {?Expr:value(Rightside_expr), Variable1_type};
 				 	false -> {none, []}
 				 end;
-		false -> {?Expr:value(Right_side_expr), infer_expr_inf(Left_side_expr, Variables)}
+		false -> {?Expr:value(Rightside_expr), infer_expr_inf(Leftside_expr, Variables)}
 	end.	
 
-bound_cons(Left_side, Right_side, Variables) ->
-	Left_side_type = infer_expr_inf(Left_side, Variables),
-	Right_side_type = infer_expr_inf(Right_side, Variables),
+bound_cons(Leftside_cons, Rightside_expr, Variables) ->
+	Leftside_cons_type = infer_expr_inf(Leftside_cons, Variables),
+	Rightside_expr_type = infer_expr_inf(Rightside_expr, Variables),
 
-	Are_matching_types = are_matching_types(Left_side_type, Right_side_type),
+	%erlang:display(Leftside_cons_type),
+	%erlang:display(Rightside_expr_type),
+
+	Are_matching_types = are_matching_types(Leftside_cons_type, Rightside_expr_type),
+
+	%erlang:display(Are_matching_types),
 
 	case Are_matching_types of
-		true -> bound_cons_elems(Left_side_type, Right_side_type);
+		true -> bound_cons_elems(Leftside_cons_type, Rightside_expr_type);
 		false -> {none, []}
 	end.
 
-bound_cons_elems(Left_side_type, Right_side_type) ->
-	
+bound_cons_elems({List_type1, []}, _) ->
+	[];
+
+bound_cons_elems({List_type1, [{variable, [Value]} | Elems1]}, {defined_list, [{Type2, Value2} | Elems2]}) ->
+	[{Value, {Type2, Value2}} | bound_cons_elems({List_type1, Elems1}, {defined_list, Elems2})];
+bound_cons_elems({List_type1, [{variable, [Value]} | Elems1]}, {undefined_list, [Elem2]}) ->
+	[{Value, Elem2} | bound_cons_elems({List_type1, Elems1}, {undefined_list, [Elem2]})];
+
+bound_cons_elems({List_type1, [{'...', [Value]} | Elems1]}, {defined_list, Elems2}) ->
+	[{Value, {defined_list, Elems2}}];
+
+bound_cons_elems({List_type1, [{'...', [Value]} | Elems1]}, {undefined_list, [{'...', [Value]} | Elems2]}) ->
+	{Value, {undefined_list, [{any, []}]}};
+bound_cons_elems({List_type1, [{'...', [Value]} | Elems1]}, {undefined_list, [Type2]}) ->
+	[{Value, {undefined_list, [Type2]}}];
+bound_cons_elems({List_type1, [Elem1 | Elems1]}, {defined_list, [Elem2 | Elems2]}) ->
+	bound_cons_elems({List_type1, Elems1}, {defined_list, Elems2});
+bound_cons_elems({List_type1, [Elem1 | Elems1]}, {undefined_list, [Elem2]}) ->
+	bound_cons_elems({List_type1, Elems1}, {undefined_list, [Elem2]}).
+
 
 are_matching_types(Type, Type) ->
 	true;
@@ -318,6 +346,11 @@ are_matching_types({Type, []}, {Type, [Value]}) when (Type == float) or (Type ==
 are_matching_types({Type, []}, {Type, []}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun)->
 	true;
 
+are_matching_types({variable, _Value}, Type2) ->
+	true;
+are_matching_types(Type1, {variable, _Value}) ->
+	true;
+
 are_matching_types({Type1, Vals1}, {Type2, Vals2}) when ((Type1 == defined_list) or (Type1 == undefined_list) or (Type1 == improper_list)) and
 														((Type2 == defined_list) or (Type2 == undefined_list) or (Type2 == improper_list)) ->
 	are_matching_lists({Type1, Vals1}, {Type2, Vals2});
@@ -337,6 +370,10 @@ are_matching_lists(List1, List2) ->
 
 are_lists_elems_matching({Type1, []}, {Type2, []}) ->
 	true;
+are_lists_elems_matching({Type1, Elems1}, {undefined_list, [{'...', _}]}) ->
+	true;
+are_lists_elems_matching({undefined_list, [{'...', _}]}, {Type2, Elems2}) ->
+	true;
 are_lists_elems_matching({defined_list, [Elem1 | Elems1]}, {defined_list, [Elem2 | Elems2]}) ->
 	are_matching_types(Elem1, Elem2) and are_lists_elems_matching({defined_list, Elems1}, {defined_list, Elems2});
 
@@ -344,11 +381,6 @@ are_lists_elems_matching({defined_list, [Elem1 | Elems1]}, {undefined_list, [Ele
 	are_matching_types(Elem1, Elem2) and are_lists_elems_matching({defined_list, Elems1}, {undefined_list, Elems2});
 are_lists_elems_matching({undefined_list, [Elem1 | Elems1]}, {defined_list, [Elem2 | Elems2]}) ->
 	are_matching_types(Elem1, Elem2) and are_lists_elems_matching({undefined_list, Elems1}, {defined_list, Elems2});
-
-are_lists_elems_matching({Type1, Elems1}, {undefined_list, ['...']}) ->
-	true;
-are_lists_elems_matching({undefined_list, ['...']}, {Type2, Elems2}) ->
-	true;
 
 are_lists_elems_matching({List1_type, [Elem1 | Elems1]}, {undefined_list, [Elem2]}) ->
 	are_matching_types(Elem1, Elem2);
@@ -362,9 +394,6 @@ are_lists_elems_matching({Type1, [Elem1 | Elems1]}, {Type2, []}) ->
 	false;
 are_lists_elems_matching({Type1, []}, {Type2, [Elem2 | Elems2]}) ->
 	false.
-
-
-
 
 infer_infix_expr_type(Expr, Operation, Variables) ->
 	[Sub_expr1, Sub_expr2] = get_children(Expr),
@@ -528,8 +557,8 @@ compute_infix_expr(_A, _B, _Operation) ->
 
 %---------------------------------Helper functions---------------------------------------------
 convert_list_values_in_basic_format_to_compound([], Converted_values) -> {defined_list, lists:reverse(Converted_values)};
-convert_list_values_in_basic_format_to_compound(['...'], Converted_values) ->
-	{undefined_list, lists:reverse(['...' | Converted_values])};
+convert_list_values_in_basic_format_to_compound([{'...', Value}], Converted_values) ->
+	{undefined_list, lists:reverse([{'...', Value} | Converted_values])};
 convert_list_values_in_basic_format_to_compound([H | T], Converted_values) ->
 	Converted_value = convert_value_in_basic_format_to_compound(H),
 	convert_list_values_in_basic_format_to_compound(T, [Converted_value | Converted_values]);
@@ -542,8 +571,8 @@ convert_value_in_basic_format_to_compound([]) ->
 	[];
 convert_value_in_basic_format_to_compound({empty_list, []}) -> 
 	{empty_list, []};
-convert_value_in_basic_format_to_compound('...') -> 
-	'...';
+convert_value_in_basic_format_to_compound({'...', Value}) -> 
+	{'...', Value};
 convert_value_in_basic_format_to_compound(Value) when is_integer(Value)->
 	{integer, [Value]};
 convert_value_in_basic_format_to_compound(Value) when is_float(Value) ->
@@ -572,8 +601,8 @@ convert_values_in_compound_format_to_basic(Value) ->
 
 convert_value_in_compound_format_to_basic({empty_list, []}) -> 
 	[];
-convert_value_in_compound_format_to_basic('...') -> 
-	'...';
+convert_value_in_compound_format_to_basic({'...', Value}) -> 
+	{'...', Value};
 convert_value_in_compound_format_to_basic({Type, [Value]}) when is_integer(Type) or is_float(Type) or is_atom(Type) or is_boolean(Type) ->
 	Value;
 convert_value_in_compound_format_to_basic({variable, Value}) ->
@@ -668,9 +697,9 @@ compare_simple_type(Pat, Par) ->
 	?Expr:value(Pat) =:= ?Expr:value(Par).
 
 compare_lists_elems(L, L) -> true;
-compare_lists_elems(['...'], _) ->
+compare_lists_elems([{'...', Value}], _) ->
 	true;
-compare_lists_elems(_, ['...']) ->
+compare_lists_elems(_, [{'...', Value}]) ->
 	true;
 compare_lists_elems([], L2) ->
 	false;
@@ -702,7 +731,7 @@ extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Variables)
 
 	case Right_cons_expr_list of
 		{empty_list, []}    -> Left_cons_expr_list;
-		{variable, _} -> Left_cons_expr_list ++ ['...'];
+		{variable, [Value]} -> Left_cons_expr_list ++ [{'...', [Value]}];
 		_             -> Left_cons_expr_list ++ Right_cons_expr_list
 	end;
 extract_expr_vals([H | T], Variables) ->
@@ -863,7 +892,15 @@ test() ->
 	erlang:display({test17, ei5, Test17 == [{improper_list,[{integer,[1]}|{integer,[2]}]}]}),
 
 	Test18 = infer_fun_type(unit_test, ei6, 1, []),
-	erlang:display({test18, ei6, Test18 == [{undefined_list,[{integer,[1]}, {integer,[2]}, {integer,[3]}, '...']}]}).
+	erlang:display({test18, ei6, Test18 == [{undefined_list,[{integer,[1]}, {integer,[2]}, {integer,[3]}, {'...', ["A"]}]}]}),
+
+	Test19 = infer_fun_type(unit_test, pm, 0, []),
+	erlang:display({test19, pm, Test19 == [{integer,[3]}]}),
+
+	Test20 = infer_fun_type(unit_test, pm2, 0, []),
+	erlang:display({test20, pm2, Test20 == [{defined_list,[{integer,[1]},{integer,[2]}]}]}).
+
+
 
 
 
