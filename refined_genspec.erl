@@ -13,7 +13,7 @@
 %8)Обрадотать случай, когда последнее выражение фнкции - funxepression.
 %10)Добавить обрабокту случая вызова функция внутри листво и таплов
 %11)Когда при присваивании на левой стороне стоит пременная с типом any а на правой переменная с каким-то более точным значением, присвоить переменной слева это значение
-%12)Улучшить обработку случая типа bound_cons_elems({List_type1, [{'...', [Value]} | Elems1]}, {undefined_list, [{'...', [Value]} | Elems2]}).Так как я не знаю тип элемента до {'...', [Value]} пришлось поставить просто any.
+%12)Улучшить обработку случая типа bound_cons_elems({List_type1, [{'...', [Value]} | Elems1]}, {list, [{'...', [Value]} | Elems2]}).Так как я не знаю тип элемента до {'...', [Value]} пришлось поставить просто any.
 
 -include("user.hrl").
 -include("spec.hrl").
@@ -272,25 +272,77 @@ bound_cons(Leftside_cons, Rightside_expr, Variables) ->
 		false -> {none, []}
 	end.
 
+
+generalize_list_type({List_type, [{Type, Value} | T]}, Possible_types, default) when (Type == empty_list) or (Type == improper_list) or (Type == defined_list) or (Type == non_empty_list) ->
+	generalize_list_type({List_type, [{Type, Value} | T]}, Possible_types, list);
+
+generalize_list_type({List_type, [{Type, Value} | T]}, Possible_types, default) ->
+	generalize_list_type({List_type, [{Type, Value} | T]}, Possible_types, Type);
+
+%nonempty_maybe_improper_list
+generalize_list_type({non_empty_list, [{'...', Value}]}, Possible_types, Generalized_type) ->
+	{nonempty_maybe_improper_list, []};
+
+%nonempty_improper_list
+generalize_list_type({improper_list, {Type, Value}}, Possible_types, Generalized_type) ->
+	case Possible_types of
+		[Value] -> {nonempty_improper_list, [Possible_types | {Type, Value}]};
+		_       -> Reversed_possible_types = lists:reverse(Possible_types),
+				   {nonempty_improper_list, [{union, Reversed_possible_types} | {Type, Value}]}
+	end;
+
+generalize_list_type({List_type, []}, Possible_types, _Generalized_type) ->
+	case Possible_types of
+		[Value] -> {non_empty_list, Possible_types};
+		_       -> {non_empty_list, [{union, lists:reverse(Possible_types)}]}
+	end;
+
+generalize_list_type({List_type, [{variable, Value} | T]}, _Possible_types, _Generalized_type) ->
+	{non_empty_list, [{any, []}]};
+
+generalize_list_type({List_type, [{Type, Value} | T]}, Possible_types, Generalized_type) when ((Type == neg_integer) or (Type == pos_integer) or (Type == non_neg_integer) or (Type == integer)) and
+																							  ((Generalized_type == float) or (Generalized_type == number)) ->
+	generalize_list_type({List_type, T}, [{number, []}], number);
+
+generalize_list_type({List_type, [{float, Value} | T]}, Possible_types, Generalized_type) when (Generalized_type == neg_integer) or (Generalized_type == pos_integer) or (Generalized_type == non_neg_integer) or (Generalized_type == integer) or (Generalized_type == number) ->
+	generalize_list_type({List_type, T}, [{number, []}], number);
+
+generalize_list_type({List_type, [{Type, Elems} | T]}, Possible_types, list) when (Type == empty_list) or (Type == improper_list) or (Type == defined_list) or (Type == non_empty_list) ->
+	%generalize_list_type({List_type, T}, [{non_empty_list, [{any, []}]}], list);
+	erlang:display(List_type),
+	{non_empty_list, [{any, []}]};
+
+generalize_list_type({List_type, [{Generalized_type, Value} | T]}, Possible_types, Generalized_type) ->
+	case lists:member({Generalized_type, Value}, Possible_types) of
+		true  -> generalize_list_type({List_type, T}, Possible_types, Generalized_type);
+		false -> generalize_list_type({List_type, T}, [{Generalized_type, Value} | Possible_types], Generalized_type)
+	end;
+
+generalize_list_type(List, Possible_types, Generalized_type) ->
+	%erlang:display(List),
+	%erlang:display(Generalized_type),
+	{non_empty_list, [{any, []}]}.
+
+
 bound_cons_elems({List_type1, []}, _) ->
 	[];
 
 bound_cons_elems({List_type1, [{variable, [Value]} | Elems1]}, {defined_list, [{Type2, Value2} | Elems2]}) ->
 	[{Value, {Type2, Value2}} | bound_cons_elems({List_type1, Elems1}, {defined_list, Elems2})];
-bound_cons_elems({List_type1, [{variable, [Value]} | Elems1]}, {undefined_list, [Elem2]}) ->
-	[{Value, Elem2} | bound_cons_elems({List_type1, Elems1}, {undefined_list, [Elem2]})];
+bound_cons_elems({List_type1, [{variable, [Value]} | Elems1]}, {list, [Elem2]}) ->
+	[{Value, Elem2} | bound_cons_elems({List_type1, Elems1}, {list, [Elem2]})];
 
 bound_cons_elems({List_type1, [{'...', [Value]} | Elems1]}, {defined_list, Elems2}) ->
 	[{Value, {defined_list, Elems2}}];
 
-bound_cons_elems({List_type1, [{'...', [Value]} | Elems1]}, {undefined_list, [{'...', [Value]} | Elems2]}) ->
-	{Value, {undefined_list, [{any, []}]}};
-bound_cons_elems({List_type1, [{'...', [Value]} | Elems1]}, {undefined_list, [Type2]}) ->
-	[{Value, {undefined_list, [Type2]}}];
+bound_cons_elems({List_type1, [{'...', [Value]} | Elems1]}, {list, [{'...', [Value]} | Elems2]}) ->
+	{Value, {list, [{any, []}]}};
+bound_cons_elems({List_type1, [{'...', [Value]} | Elems1]}, {list, [Type2]}) ->
+	[{Value, {list, [Type2]}}];
 bound_cons_elems({List_type1, [Elem1 | Elems1]}, {defined_list, [Elem2 | Elems2]}) ->
 	bound_cons_elems({List_type1, Elems1}, {defined_list, Elems2});
-bound_cons_elems({List_type1, [Elem1 | Elems1]}, {undefined_list, [Elem2]}) ->
-	bound_cons_elems({List_type1, Elems1}, {undefined_list, [Elem2]}).
+bound_cons_elems({List_type1, [Elem1 | Elems1]}, {list, [Elem2]}) ->
+	bound_cons_elems({List_type1, Elems1}, {list, [Elem2]}).
 
 
 are_matching_types(Type, Type) ->
@@ -351,8 +403,8 @@ are_matching_types({variable, _Value}, Type2) ->
 are_matching_types(Type1, {variable, _Value}) ->
 	true;
 
-are_matching_types({Type1, Vals1}, {Type2, Vals2}) when ((Type1 == defined_list) or (Type1 == undefined_list) or (Type1 == non_empty_list) or (Type1 == improper_list)) and
-														((Type2 == defined_list) or (Type2 == undefined_list) or (Type2 == non_empty_list) or (Type2 == improper_list)) ->
+are_matching_types({Type1, Vals1}, {Type2, Vals2}) when ((Type1 == defined_list) or (Type1 == list) or (Type1 == non_empty_list) or (Type1 == improper_list)) and
+														((Type2 == defined_list) or (Type2 == list) or (Type2 == non_empty_list) or (Type2 == improper_list)) ->
 	are_matching_lists({Type1, Vals1}, {Type2, Vals2});
 
 are_matching_types(Type1, Type2) ->
@@ -360,9 +412,9 @@ are_matching_types(Type1, Type2) ->
 
 are_matching_lists(List, List) ->
 	true;
-are_matching_lists({empty_list, []}, {undefined_list, Val}) ->
+are_matching_lists({empty_list, []}, {list, Val}) ->
 	true;
-are_matching_lists({undefined_list, Val}, {empty_list, []}) ->
+are_matching_lists({list, Val}, {empty_list, []}) ->
 	true;
 are_matching_lists(List1, List2) ->
 	are_lists_elems_matching(List1, List2).
@@ -382,9 +434,9 @@ are_lists_elems_matching({defined_list, [Elem1 | Elems1]}, {non_empty_list, [Ele
 are_lists_elems_matching({non_empty_list, [Elem1 | Elems1]}, {defined_list, [Elem2 | Elems2]}) ->
 	are_matching_types(Elem1, Elem2) and are_lists_elems_matching({non_empty_list, Elems1}, {defined_list, Elems2});
 
-are_lists_elems_matching({List1_type, [Elem1 | Elems1]}, {undefined_list, [Elem2]}) ->
+are_lists_elems_matching({List1_type, [Elem1 | Elems1]}, {list, [Elem2]}) ->
 	are_matching_types(Elem1, Elem2);
-are_lists_elems_matching({undefined_list, [Elem1]}, {List2_type, [Elem2 | Elems2]}) ->
+are_lists_elems_matching({list, [Elem1]}, {List2_type, [Elem2 | Elems2]}) ->
 	are_matching_types(Elem1, Elem2);
 
 are_lists_elems_matching({non_empty_list, [Elem1 | Elems1]}, {non_empty_list, [Elem2 | Elems2]}) ->
@@ -556,7 +608,8 @@ compute_infix_expr(_A, _B, _Operation) ->
 	{none, []}.
 
 %---------------------------------Helper functions---------------------------------------------
-convert_list_elems_in_basic_format_to_compound([], Converted_values) -> {defined_list, lists:reverse(Converted_values)};
+convert_list_elems_in_basic_format_to_compound([], Converted_values) -> 
+	{defined_list, lists:reverse(Converted_values)};
 convert_list_elems_in_basic_format_to_compound([{'...', Value}], Converted_values) ->
 	{non_empty_list, lists:reverse([{'...', Value} | Converted_values])};
 convert_list_elems_in_basic_format_to_compound([H | T], Converted_values) ->
@@ -566,7 +619,6 @@ convert_list_elems_in_basic_format_to_compound(Value, Converted_values) ->
 	Converted_value = convert_value_in_basic_format_to_compound(Value),
 	Reversed_values = lists:reverse(Converted_values),
 	{improper_list, Converted_values ++ Converted_value}.
-
 
 convert_tuple_elems_in_basic_format_to_compound([]) -> [];
 convert_tuple_elems_in_basic_format_to_compound([H | T]) ->
@@ -611,7 +663,7 @@ convert_value_in_compound_format_to_basic({Type, [Value]}) when is_integer(Type)
 	Value;
 convert_value_in_compound_format_to_basic({variable, Value}) ->
 	{variable, Value};
-convert_value_in_compound_format_to_basic({List_type, Values}) when (List_type == defined_list) or (List_type == undefined_list) or (List_type == improper_list) or (List_type == non_empty_list) ->
+convert_value_in_compound_format_to_basic({List_type, Values}) when (List_type == defined_list) or (List_type == list) or (List_type == improper_list) or (List_type == non_empty_list) ->
 	convert_values_in_compound_format_to_basic(Values);
 convert_value_in_compound_format_to_basic({tuple, Values}) ->
 	Tuple_elems_list = convert_values_in_compound_format_to_basic(Values),
@@ -923,16 +975,11 @@ test() ->
 	Test20 = infer_fun_type(unit_test, pm2, 0, []),
 	erlang:display({test20, pm2, Test20 == [{defined_list,[{integer,[1]},{integer,[2]}]}]}).
 
+g(List) -> 
+	generalize_list_type(List, [], default).
 
-
-
-
-
-
-
-
-
-
+c(Value) ->
+	convert_value_in_basic_format_to_compound(Value).
 
 
 
