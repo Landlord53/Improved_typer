@@ -3,6 +3,7 @@
 %Сравнить результат тайпера и рузультат моего алгоритма. Отрбасывать все варианты тайпера, которые совсем не совпадают с результатом моего алгоритма. Например Если результат моего алгоритма выдаёт "integer | list", а тайпер "number | list | atom", то оставляем только "number | list". 
 
 %------TODO list----------------
+%1)Исправить листы в spec_proc модуле
 %1)Process guard expressions(В разделе "Defining actual clauses")
 %2)Process fun expressions  (В разделе "Defining actual clauses")
 %3)Добавить проверку, что если паттерн абсолютно совпадает с actual parameters, не проверять дальше.
@@ -13,7 +14,6 @@
 %10)Добавить обрабокту случая вызова функция внутри листво и таплов
 %11)Когда при присваивании на левой стороне стоит пременная с типом any а на правой переменная с каким-то более точным значением, присвоить переменной слева это значение
 %12)Улучшить обработку случая типа bound_cons_elems({List_type1, [{'...', [Value]} | Elems1]}, {undefined_list, [{'...', [Value]} | Elems2]}).Так как я не знаю тип элемента до {'...', [Value]} пришлось поставить просто any.
-
 
 -include("user.hrl").
 -include("spec.hrl").
@@ -351,8 +351,8 @@ are_matching_types({variable, _Value}, Type2) ->
 are_matching_types(Type1, {variable, _Value}) ->
 	true;
 
-are_matching_types({Type1, Vals1}, {Type2, Vals2}) when ((Type1 == defined_list) or (Type1 == undefined_list) or (Type1 == improper_list)) and
-														((Type2 == defined_list) or (Type2 == undefined_list) or (Type2 == improper_list)) ->
+are_matching_types({Type1, Vals1}, {Type2, Vals2}) when ((Type1 == defined_list) or (Type1 == undefined_list) or (Type1 == non_empty_list) or (Type1 == improper_list)) and
+														((Type2 == defined_list) or (Type2 == undefined_list) or (Type2 == non_empty_list) or (Type2 == improper_list)) ->
 	are_matching_lists({Type1, Vals1}, {Type2, Vals2});
 
 are_matching_types(Type1, Type2) ->
@@ -360,9 +360,9 @@ are_matching_types(Type1, Type2) ->
 
 are_matching_lists(List, List) ->
 	true;
-are_matching_lists({empty_list, []}, {undefined_list, [Val]}) ->
+are_matching_lists({empty_list, []}, {undefined_list, Val}) ->
 	true;
-are_matching_lists({undefined_list, [Val]}, {empty_list, []}) ->
+are_matching_lists({undefined_list, Val}, {empty_list, []}) ->
 	true;
 are_matching_lists(List1, List2) ->
 	are_lists_elems_matching(List1, List2).
@@ -370,24 +370,24 @@ are_matching_lists(List1, List2) ->
 
 are_lists_elems_matching({Type1, []}, {Type2, []}) ->
 	true;
-are_lists_elems_matching({Type1, Elems1}, {undefined_list, [{'...', _}]}) ->
+are_lists_elems_matching({Type1, Elems1}, {non_empty_list, [{'...', _}]}) ->
 	true;
-are_lists_elems_matching({undefined_list, [{'...', _}]}, {Type2, Elems2}) ->
+are_lists_elems_matching({non_empty_list, [{'...', _}]}, {Type2, Elems2}) ->
 	true;
 are_lists_elems_matching({defined_list, [Elem1 | Elems1]}, {defined_list, [Elem2 | Elems2]}) ->
 	are_matching_types(Elem1, Elem2) and are_lists_elems_matching({defined_list, Elems1}, {defined_list, Elems2});
 
-are_lists_elems_matching({defined_list, [Elem1 | Elems1]}, {undefined_list, [Elem2 | Elems2]}) ->
-	are_matching_types(Elem1, Elem2) and are_lists_elems_matching({defined_list, Elems1}, {undefined_list, Elems2});
-are_lists_elems_matching({undefined_list, [Elem1 | Elems1]}, {defined_list, [Elem2 | Elems2]}) ->
-	are_matching_types(Elem1, Elem2) and are_lists_elems_matching({undefined_list, Elems1}, {defined_list, Elems2});
+are_lists_elems_matching({defined_list, [Elem1 | Elems1]}, {non_empty_list, [Elem2 | Elems2]}) ->
+	are_matching_types(Elem1, Elem2) and are_lists_elems_matching({defined_list, Elems1}, {non_empty_list, Elems2});
+are_lists_elems_matching({non_empty_list, [Elem1 | Elems1]}, {defined_list, [Elem2 | Elems2]}) ->
+	are_matching_types(Elem1, Elem2) and are_lists_elems_matching({non_empty_list, Elems1}, {defined_list, Elems2});
 
 are_lists_elems_matching({List1_type, [Elem1 | Elems1]}, {undefined_list, [Elem2]}) ->
 	are_matching_types(Elem1, Elem2);
 are_lists_elems_matching({undefined_list, [Elem1]}, {List2_type, [Elem2 | Elems2]}) ->
 	are_matching_types(Elem1, Elem2);
 
-are_lists_elems_matching({undefined_list, [Elem1 | Elems1]}, {undefined_list, [Elem2 | Elems2]}) ->
+are_lists_elems_matching({non_empty_list, [Elem1 | Elems1]}, {non_empty_list, [Elem2 | Elems2]}) ->
 	are_matching_types(Elem1, Elem2) and are_lists_elems_matching(Elems1, Elems2);
 
 are_lists_elems_matching({Type1, [Elem1 | Elems1]}, {Type2, []}) ->
@@ -556,16 +556,22 @@ compute_infix_expr(_A, _B, _Operation) ->
 	{none, []}.
 
 %---------------------------------Helper functions---------------------------------------------
-convert_list_values_in_basic_format_to_compound([], Converted_values) -> {defined_list, lists:reverse(Converted_values)};
-convert_list_values_in_basic_format_to_compound([{'...', Value}], Converted_values) ->
-	{undefined_list, lists:reverse([{'...', Value} | Converted_values])};
-convert_list_values_in_basic_format_to_compound([H | T], Converted_values) ->
+convert_list_elems_in_basic_format_to_compound([], Converted_values) -> {defined_list, lists:reverse(Converted_values)};
+convert_list_elems_in_basic_format_to_compound([{'...', Value}], Converted_values) ->
+	{non_empty_list, lists:reverse([{'...', Value} | Converted_values])};
+convert_list_elems_in_basic_format_to_compound([H | T], Converted_values) ->
 	Converted_value = convert_value_in_basic_format_to_compound(H),
-	convert_list_values_in_basic_format_to_compound(T, [Converted_value | Converted_values]);
-convert_list_values_in_basic_format_to_compound(Value, Converted_values) ->
+	convert_list_elems_in_basic_format_to_compound(T, [Converted_value | Converted_values]);
+convert_list_elems_in_basic_format_to_compound(Value, Converted_values) ->
 	Converted_value = convert_value_in_basic_format_to_compound(Value),
 	Reversed_values = lists:reverse(Converted_values),
 	{improper_list, Converted_values ++ Converted_value}.
+
+
+convert_tuple_elems_in_basic_format_to_compound([]) -> [];
+convert_tuple_elems_in_basic_format_to_compound([H | T]) ->
+	Converted_value = convert_value_in_basic_format_to_compound(H),
+	[Converted_value | convert_tuple_elems_in_basic_format_to_compound(T)].
 
 convert_value_in_basic_format_to_compound([]) -> 
 	[];
@@ -584,12 +590,10 @@ convert_value_in_basic_format_to_compound(Value) when is_boolean(Value) ->
 convert_value_in_basic_format_to_compound({variable, Value}) ->
 	{variable, Value};
 convert_value_in_basic_format_to_compound(Value) when is_list(Value) ->
-	Values_list = convert_list_values_in_basic_format_to_compound(Value, []),
-	convert_list_values_in_basic_format_to_compound(Value, []);
+	convert_list_elems_in_basic_format_to_compound(Value, []);
 convert_value_in_basic_format_to_compound(Value) when is_tuple(Value) ->
 	Tuple_elems_list = tuple_to_list(Value),
-	{_, Elems_in_compound_format} = convert_list_values_in_basic_format_to_compound(Tuple_elems_list, []),
-	{tuple, Elems_in_compound_format}.
+	{tuple, convert_tuple_elems_in_basic_format_to_compound(Tuple_elems_list)}.
 
 convert_values_in_compound_format_to_basic([]) -> [];
 convert_values_in_compound_format_to_basic({empty_list, []}) ->
@@ -607,7 +611,7 @@ convert_value_in_compound_format_to_basic({Type, [Value]}) when is_integer(Type)
 	Value;
 convert_value_in_compound_format_to_basic({variable, Value}) ->
 	{variable, Value};
-convert_value_in_compound_format_to_basic({List_type, Values}) when (List_type == defined_list) or (List_type == undefined_list) or (List_type == improper_list) ->
+convert_value_in_compound_format_to_basic({List_type, Values}) when (List_type == defined_list) or (List_type == undefined_list) or (List_type == improper_list) or (List_type == non_empty_list) ->
 	convert_values_in_compound_format_to_basic(Values);
 convert_value_in_compound_format_to_basic({tuple, Values}) ->
 	Tuple_elems_list = convert_values_in_compound_format_to_basic(Values),
@@ -651,9 +655,11 @@ find_actual_clause([Pat | Pats], Pars) ->
 	Res = compare_terms(Pat, Pars),
 
 	case Res of 
-		true  -> [Clause] = ?Query:exec(hd(Pat), ?Expr:clause()),
-				 [{Clause, Pat} | find_actual_clause(Pats, Pars)];
-		false -> find_actual_clause(Pats, Pars)
+		true     -> [Clause] = ?Query:exec(hd(Pat), ?Expr:clause()),
+				    [{Clause, Pat}];
+		possibly -> [Clause] = ?Query:exec(hd(Pat), ?Expr:clause()),
+				 	[{Clause, Pat} | find_actual_clause(Pats, Pars)];
+		false    -> find_actual_clause(Pats, Pars)
 	end.	
 
 compare_terms([], []) -> true;
@@ -664,16 +670,19 @@ compare_terms([Pat | Pats], [Par | Pars]) ->
 	case {Param_type, Pat_type} of
 		{cons, cons}     -> case compare_cons(Pat, Par) of
 						   		true  -> compare_terms(Pats, Pars);
+						   		possibly -> compare_terms(Pats, Pars);
 								false -> false
 							end;
 		{tuple, tuple} -> case compare_tuples(Pat, Par) of
 						   		true  -> compare_terms(Pats, Pars);
+						   		possibly -> compare_terms(Pats, Pars);
 								false -> false
 							end;
-		{_, variable}    -> true;
-		{variable, _}    -> true;
+		{_, variable}    -> possibly;
+		{variable, _}    -> possibly;
 		_                -> case compare_simple_type(Pat, Par) of
 								true  -> compare_terms(Pats, Pars);
+								possibly -> compare_terms(Pats, Pars);
 								false -> false
 							end
 	end.
@@ -691,33 +700,47 @@ compare_cons(Con1, Con2) ->
 	List_elems1 = construct_list_from_cons_expr(Con1, []),
 	List_elems2 = construct_list_from_cons_expr(Con2, []),
 
-	compare_lists_elems(List_elems1, List_elems2).
+	compare_lists_elems(List_elems1, List_elems2, true).
 
 compare_simple_type(Pat, Par) ->
 	?Expr:value(Pat) =:= ?Expr:value(Par).
 
-compare_lists_elems(L, L) -> true;
-compare_lists_elems([{'...', Value}], _) ->
-	true;
-compare_lists_elems(_, [{'...', Value}]) ->
-	true;
-compare_lists_elems([], L2) ->
+compare_lists_elems(_, _, false) ->
 	false;
-compare_lists_elems(L1, []) ->
+compare_lists_elems(L, L, Status) -> Status;
+compare_lists_elems([{'...', Value}], _, _) ->
+	possibly;
+compare_lists_elems(_, [{'...', Value}], _) ->
+	possibly;
+compare_lists_elems([], L2, _) ->
 	false;
-compare_lists_elems([{variable, _} | T1], [_ | T2]) ->
-	compare_lists_elems(T1, T2);
-compare_lists_elems([_ | T1], [{variable, _} | T2]) ->
-	compare_lists_elems(T1, T2);
-compare_lists_elems([H1 | T1], [H2 | T2]) when erlang:is_list(H1) and erlang:is_list(H2) ->
-	compare_lists_elems(H1, H2) and compare_lists_elems(T1, T2);
-compare_lists_elems([H1 | T1], [H2 | T2]) when erlang:is_tuple(H1) and erlang:is_tuple(H2) ->
+compare_lists_elems(L1, [], _) ->
+	false;
+compare_lists_elems([{variable, _} | T1], [_ | T2], _) ->
+	compare_lists_elems(T1, T2, possibly);
+compare_lists_elems([_ | T1], [{variable, _} | T2], _) ->
+	compare_lists_elems(T1, T2, possibly);
+compare_lists_elems([H1 | T1], [H2 | T2], Status) when erlang:is_list(H1) and erlang:is_list(H2) ->
+	Result = compare_lists_elems(H1, H2, Status),
+
+	case Result of
+		false -> false;
+		possibly -> compare_lists_elems(T1, T2, possibly);
+		true     -> compare_lists_elems(T1, T2, Status)
+	end;
+compare_lists_elems([H1 | T1], [H2 | T2], Status) when erlang:is_tuple(H1) and erlang:is_tuple(H2) ->
 	Tuple1 = erlang:tuple_to_list(H1),
 	Tuple2 = erlang:tuple_to_list(H2),
-	compare_lists_elems(Tuple1, Tuple2) and compare_lists_elems(T1, T2);
-compare_lists_elems([H1 | T1], [H2 | T2]) ->
+	Result = compare_lists_elems(Tuple1, Tuple2, Status),
+
+	case Result of
+		false -> false;
+		possibly -> compare_lists_elems(T1, T2, possibly);
+		true     -> compare_lists_elems(T1, T2, Status)
+	end;
+compare_lists_elems([H1 | T1], [H2 | T2], Status) ->
 	case H1 == H2 of
-		true -> compare_lists_elems(T1, T2);
+		true -> compare_lists_elems(T1, T2, Status);
 		false -> false
 	end.
 
@@ -892,7 +915,7 @@ test() ->
 	erlang:display({test17, ei5, Test17 == [{improper_list,[{integer,[1]}|{integer,[2]}]}]}),
 
 	Test18 = infer_fun_type(unit_test, ei6, 1, []),
-	erlang:display({test18, ei6, Test18 == [{undefined_list,[{integer,[1]}, {integer,[2]}, {integer,[3]}, {'...', ["A"]}]}]}),
+	erlang:display({test18, ei6, Test18 == [{non_empty_list,[{integer,[1]}, {integer,[2]}, {integer,[3]}, {'...', ["A"]}]}]}),
 
 	Test19 = infer_fun_type(unit_test, pm, 0, []),
 	erlang:display({test19, pm, Test19 == [{integer,[3]}]}),
