@@ -5,15 +5,15 @@
 %------TODO list----------------
 %1)Исправить листы в spec_proc модуле
 %1)Process guard expressions(В разделе "Defining actual clauses")
-%2)Process fun expressions  (В разделе "Defining actual clauses")
-%3)Добавить проверку, что если паттерн абсолютно совпадает с actual parameters, не проверять дальше.
 %4)Функция get_fun_name не обрабатывает случай, когда можду именем функции и скобками есть пробелы.
 %6)Добавить обработку случая, когда нет actual clauses для функции infer_internal_fun.
 %7)Добавить обработку случая, для выражений типо [1,2 | B] = SomeList, а так же когда аргумент функции паттерматчат к дкакому-либо значению.
-%8)Обрадотать случай, когда последнее выражение фнкции - funxepression.
+%8)Обрадотать случай, когда последнее выражение функции - funxepression.
 %10)Добавить обрабокту случая вызова функция внутри листво и таплов
 %11)Когда при присваивании на левой стороне стоит пременная с типом any а на правой переменная с каким-то более точным значением, присвоить переменной слева это значение
 %12)Улучшить обработку случая типа bound_cons_elems({List_type1, [{'...', [Value]} | Elems1]}, {list, [{'...', [Value]} | Elems2]}).Так как я не знаю тип элемента до {'...', [Value]} пришлось поставить просто any.
+%13)Добавить стринг
+%14)Добавить типы pos_integer, neg_integer, etc о время вычисления infix expressions и prefix expressions
 
 -include("user.hrl").
 -include("spec.hrl").
@@ -268,16 +268,177 @@ bound_cons(Leftside_cons, Rightside_expr, Variables) ->
 	%erlang:display(Are_matching_types),
 
 	case Are_matching_types of
-		true -> bound_cons_elems(Leftside_cons_type, Rightside_expr_type);
+		true ->  Generalized_list_type = generalize_list_type(Rightside_expr_type, [], default),
+				 bound_cons_elems(Leftside_cons_type, Generalized_list_type);
 		false -> {none, []}
 	end.
 
 
+
+	
+generalize_list_type2(List, [])->
+	Possible_types = {
+		{bools, []}, {nums, []}, {atoms, []}, {lists, []}, {tuples, []}
+	},
+
+	generalize_list_type2(List, Possible_types);
+
+generalize_list_type2({List_type, []}, any) ->
+	{non_empty_list, [{any, []}]};
+
+
+generalize_list_type2({List_type, []}, Possible_types) ->
+	Possible_types_in_list = tuple_to_list(Possible_types),
+	Gen_type = lists:concat(lists:map(fun({Type, Values}) -> Values end, Possible_types_in_list)),
+
+	case length(Gen_type) of
+		1 -> {non_empty_list, Gen_type};
+		_ -> {non_empty_list, [{union, Gen_type}]}
+	end;
+
+%empty_list
+generalize_list_type2({empty_list, []}, Possible_types) ->
+	{empty_list, []};
+
+%nonempty_maybe_improper_list
+generalize_list_type2({non_empty_list, [{'...', Value}]}, _) ->
+	{nonempty_maybe_improper_list, []};
+
+%improper list
+generalize_list_type2({improper_list, {Type, Value}}, Possible_types) ->
+	Possible_types_in_list = tuple_to_list(Possible_types),
+	Gen_type = lists:concat(lists:map(fun({Type, Values}) -> Values end, Possible_types_in_list)),
+
+	case length(Gen_type) of
+		1 -> {nonempty_improper_list, [Gen_type | {Type, Value}]};
+		_ -> {nonempty_improper_list, [{union, Gen_type} | {Type, Value}]}
+	end;
+
+%improper_list
+generalize_list_type2({improper_list, {Type, Value}}, any) ->
+	{nonempty_improper_list, [{any, []} | {Type, Value}]};
+
+generalize_list_type2({List_type, [{variable, Value} | T]}, _) ->
+	generalize_list_type2({List_type, T}, any); 
+
+generalize_list_type2({List_type, [{El_type, El_value} | T]}, Possible_types) when El_type == boolean ->
+	Bools = element(1, Possible_types),
+	Gen_bool_values = generalize_bools({El_type, El_value}, Bools),
+	Upd_possible_types = setelement(1, Possible_types, Gen_bool_values),
+	generalize_list_type2({List_type, T}, Upd_possible_types);
+
+generalize_list_type2({List_type, [{El_type, El_value} | T]}, Possible_types) when ((El_type == neg_integer) or (El_type == pos_integer) or (El_type == non_neg_integer) or (El_type == integer) or (El_type == float) or (El_type == number)) ->
+	Nums = element(2, Possible_types),
+	Gen_nums_values = generalize_numbers({El_type, El_value}, Nums),
+	Upd_possible_types = setelement(2, Possible_types, Gen_nums_values),
+	generalize_list_type2({List_type, T}, Upd_possible_types);
+
+generalize_list_type2({List_type, [{El_type, El_value} | T]}, Possible_types) when El_type == atom ->
+	Atoms = element(3, Possible_types),
+	Gen_atom_values = generalize_atoms({El_type, El_value}, Atoms),
+	Upd_possible_types = setelement(3, Possible_types, Gen_atom_values),
+	generalize_list_type2({List_type, T}, Upd_possible_types);
+
+generalize_list_type2({List_type, [{El_type, El_value} | T]}, Possible_types) when (El_type == empty_list) or (El_type == improper_list) or (El_type == defined_list) or (El_type == non_empty_list) ->
+	Lists = element(4, Possible_types),
+	Gen_list_values = generalize_atoms({El_type, El_value}, Lists),
+	Upd_possible_types = setelement(4, Possible_types, Gen_list_values),
+	generalize_list_type2({List_type, T}, Upd_possible_types).
+
+generalize_bools(Boolean, {bools, []}) ->
+	{bools, [Boolean]};
+generalize_bools({boolean, Value}, {bools, [{boolean, []}]}) ->
+	{bools, [{boolean, []}]};
+generalize_bools({boolean, [Value]}, {bools, [{boolean, [Value]}]}) ->
+	{bools, [{boolean, [Value]}]};
+generalize_bools({boolean, [false]}, {bools, [{boolean, [true]}]}) ->
+	{bools, [{boolean, []}]};
+generalize_bools({boolean, [true]}, {bools, [{boolean, [false]}]}) ->
+	{bools, [{boolean, []}]}.
+
+generalize_atoms(Atom, {atoms, []}) ->
+	{atoms, [Atom]};
+generalize_atoms({atom, []}, _) ->
+	{atoms, [{atom, []}]};
+generalize_atoms(_, {atoms, [{atom, []}]}) ->
+	{atoms, [{atom, []}]};
+generalize_atoms({Type, Value}, {Type, Values = [{El_type, [El_value]} | _]}) ->
+	case lists:member({Type, Value}, Values) of
+		true -> {atoms, Values};
+		false -> {atoms, [{Type, Value} | Values]}
+	end.
+
+generalize_numbers({Type, Value}, {nums, []}) ->
+	{Type, [{Type, Value}]};
+generalize_numbers(_Number, Nums = {number, [{number, []}]}) ->
+	Nums;
+generalize_numbers({float, Value}, {Gen_type, Values}) when ((Gen_type == neg_integer) or (Gen_type == pos_integer) or (Gen_type == non_neg_integer) or (Gen_type == integer)) ->
+	{number, [{number, []}]};
+generalize_numbers({Type, Value}, {float, Values}) when ((Type == neg_integer) or (Type == pos_integer) or (Type == non_neg_integer) or (Type == integer)) ->
+	{number, [{number, []}]};
+
+generalize_numbers({float, []}, {float, Values}) -> 
+	{float, [{float, []}]};	
+generalize_numbers({Type, []}, {integer, Values}) when ((Type == neg_integer) or (Type == pos_integer) or (Type == non_neg_integer) or (Type == integer)) ->
+	{integer, [{integer, []}]};
+
+generalize_numbers({neg_integer, []}, {Gen_type, Values}) when (Gen_type == pos_integer) or (Gen_type == non_neg_integer) ->
+	{integer, [{integer, []}]};
+
+generalize_numbers({pos_integer, []}, {non_neg_integer, Values}) ->
+	{integer, [{integer, []}]};
+
+generalize_numbers({Type, Value}, {Type, Values = [{El_type, [El_value]} | _]}) ->
+	case lists:member({Type, Value}, Values) of
+		true -> {Type, Values};
+		false -> {Type, [{Type, Value} | Values]}
+	end.
+
+%generalize_lists({List_type, Elems}, {lists, []}) ->
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 generalize_list_type({List_type, [{Type, Value} | T]}, Possible_types, default) when (Type == empty_list) or (Type == improper_list) or (Type == defined_list) or (Type == non_empty_list) ->
-	generalize_list_type({List_type, [{Type, Value} | T]}, Possible_types, list);
+	generalize_list_type({List_type, [{Type, Value} | T]}, Possible_types, Type);
 
 generalize_list_type({List_type, [{Type, Value} | T]}, Possible_types, default) ->
 	generalize_list_type({List_type, [{Type, Value} | T]}, Possible_types, Type);
+
+%empty_list
+generalize_list_type({empty_list, []}, _Possible_types, _Generalized_type) ->
+	{empty_list, []};
 
 %nonempty_maybe_improper_list
 generalize_list_type({non_empty_list, [{'...', Value}]}, Possible_types, Generalized_type) ->
@@ -291,12 +452,14 @@ generalize_list_type({improper_list, {Type, Value}}, Possible_types, Generalized
 				   {nonempty_improper_list, [{union, Reversed_possible_types} | {Type, Value}]}
 	end;
 
+%Non_empty_list
 generalize_list_type({List_type, []}, Possible_types, _Generalized_type) ->
 	case Possible_types of
 		[Value] -> {non_empty_list, Possible_types};
 		_       -> {non_empty_list, [{union, lists:reverse(Possible_types)}]}
 	end;
 
+%non_empty_list
 generalize_list_type({List_type, [{variable, Value} | T]}, _Possible_types, _Generalized_type) ->
 	{non_empty_list, [{any, []}]};
 
@@ -307,21 +470,84 @@ generalize_list_type({List_type, [{Type, Value} | T]}, Possible_types, Generaliz
 generalize_list_type({List_type, [{float, Value} | T]}, Possible_types, Generalized_type) when (Generalized_type == neg_integer) or (Generalized_type == pos_integer) or (Generalized_type == non_neg_integer) or (Generalized_type == integer) or (Generalized_type == number) ->
 	generalize_list_type({List_type, T}, [{number, []}], number);
 
-generalize_list_type({List_type, [{Type, Elems} | T]}, Possible_types, list) when (Type == empty_list) or (Type == improper_list) or (Type == defined_list) or (Type == non_empty_list) ->
-	%generalize_list_type({List_type, T}, [{non_empty_list, [{any, []}]}], list);
-	erlang:display(List_type),
-	{non_empty_list, [{any, []}]};
+generalize_list_type({List_type, [{Type, Elems} | T]}, Possible_types, Generalized_type) when ((Type == empty_list) or (Type == improper_list) or (Type == defined_list) or (Type == non_empty_list)) and
+																							  ((Generalized_type == empty_list) or (Generalized_type == improper_list) or (Generalized_type == defined_list) or (Generalized_type == non_empty_list) or (Generalized_type == nonempty_maybe_improper_list))->
+	generalize_list_with_lists({List_type, [{Type, Elems} | T]}, [], default, default);
+	%{non_empty_list, [{any, []}]};
 
-generalize_list_type({List_type, [{Generalized_type, Value} | T]}, Possible_types, Generalized_type) ->
+generalize_list_type({List_type, [{Type, Value} | T]}, Possible_types, Generalized_type) ->
 	case lists:member({Generalized_type, Value}, Possible_types) of
 		true  -> generalize_list_type({List_type, T}, Possible_types, Generalized_type);
 		false -> generalize_list_type({List_type, T}, [{Generalized_type, Value} | Possible_types], Generalized_type)
 	end;
 
+%non_empty_list
 generalize_list_type(List, Possible_types, Generalized_type) ->
-	%erlang:display(List),
-	%erlang:display(Generalized_type),
 	{non_empty_list, [{any, []}]}.
+
+
+generalize_list_with_lists({Main_list_type, []}, Possible_types, Generalized_List_type, _) ->
+	erlang:display(Generalized_List_type),
+
+	case Possible_types of
+		[]     -> {Main_list_type, [{Generalized_List_type, []}]};
+		[Elem] -> {Main_list_type, [{Generalized_List_type, [Elem]}]};
+		Elems       -> {Main_list_type, [{Generalized_List_type, [{union, lists:reverse(Elems)}]}]}
+	end;
+
+generalize_list_with_lists({Main_list_type, [{Member_list_Type, Elems} | T]}, Possible_types, default, default) ->
+	generalize_list_with_lists({non_empty_list, [{Member_list_Type, Elems} | T]}, Possible_types, Member_list_Type, default);
+
+generalize_list_with_lists({Main_list_type, [{Member_list_Type, Elems} | T]}, Possible_types, Common_lsts_type, Generalized_elems_type) ->
+	%erlang:display({Member_list_Type, Elems}),
+	{Gen_lst_type, Gen_lst_elems} = generalize_list_type({Member_list_Type, Elems}, Possible_types, Generalized_elems_type),
+	%erlang:display(Gen_lst_type),
+	Gened_type = generalize_two_lists(Gen_lst_type, Common_lsts_type),
+
+	case {Gen_lst_type, Gen_lst_elems} of
+		{empty_list, []} -> generalize_list_with_lists({Main_list_type, T}, [], Gened_type, default);
+		{List_type, [{union, [{Un_elem_type, Value} | Union_elems]}]} -> 
+			generalize_list_with_lists({Main_list_type, T}, lists:reverse([{Un_elem_type, Value} | Union_elems]), Gened_type, Un_elem_type);
+		{List_type, [{Elem_type, Elem_value}]} -> 
+			generalize_list_with_lists({Main_list_type, T}, [{Elem_type, Elem_value}], Gened_type, Elem_type)
+	end.
+
+generalize_two_lists(List_type, List_type) ->
+	List_type;
+
+generalize_two_lists(List1, list) ->
+	list;
+generalize_two_lists(list, List2) ->
+	list;
+
+generalize_two_lists(maybe_improper_list, List2) when (List2 == non_empty_list) or (List2 == nonempty_improper_list) or (List2 == nonempty_maybe_improper_list) ->
+	maybe_improper_list;
+generalize_two_lists(List1, maybe_improper_list) when (List1 == non_empty_list) or (List1 == nonempty_improper_list) or (List1 == nonempty_maybe_improper_list)->
+	maybe_improper_list;
+
+generalize_two_lists(empty_list, nonempty_maybe_improper_list) ->
+	maybe_improper_list;
+generalize_two_lists(nonempty_maybe_improper_list, empty_list) ->
+	maybe_improper_list;
+
+generalize_two_lists(non_empty_list, empty_list) ->
+	list;
+generalize_two_lists(empty_list, non_empty_list) ->
+	list;
+generalize_two_lists(nonempty_improper_list, empty_list) ->
+	maybe_improper_list;
+generalize_two_lists(empty_list, nonempty_improper_list) ->
+	maybe_improper_list;
+
+generalize_two_lists(nonempty_maybe_improper_list, List2) when (List2 == non_empty_list) or (List2 == nonempty_improper_list) ->
+	nonempty_maybe_improper_list;
+generalize_two_lists(List1, nonempty_maybe_improper_list) when (List1 == non_empty_list) or (List1 == nonempty_improper_list) ->
+	nonempty_maybe_improper_list;
+
+generalize_two_lists(nonempty_improper_list, non_empty_list) ->
+	nonempty_maybe_improper_list;	
+generalize_two_lists(non_empty_list, nonempty_improper_list) ->
+	nonempty_maybe_improper_list.
 
 
 bound_cons_elems({List_type1, []}, _) ->
@@ -626,7 +852,7 @@ convert_tuple_elems_in_basic_format_to_compound([H | T]) ->
 	[Converted_value | convert_tuple_elems_in_basic_format_to_compound(T)].
 
 convert_value_in_basic_format_to_compound([]) -> 
-	[];
+	{empty_list, []};
 convert_value_in_basic_format_to_compound({empty_list, []}) -> 
 	{empty_list, []};
 convert_value_in_basic_format_to_compound({'...', Value}) -> 
@@ -635,10 +861,10 @@ convert_value_in_basic_format_to_compound(Value) when is_integer(Value)->
 	{integer, [Value]};
 convert_value_in_basic_format_to_compound(Value) when is_float(Value) ->
 	{float, [Value]};
-convert_value_in_basic_format_to_compound(Value) when is_atom(Value) ->
-	{atom, [Value]};
 convert_value_in_basic_format_to_compound(Value) when is_boolean(Value) ->
 	{boolean, [Value]};
+convert_value_in_basic_format_to_compound(Value) when is_atom(Value) ->
+	{atom, [Value]};
 convert_value_in_basic_format_to_compound({variable, Value}) ->
 	{variable, Value};
 convert_value_in_basic_format_to_compound(Value) when is_list(Value) ->
@@ -976,7 +1202,7 @@ test() ->
 	erlang:display({test20, pm2, Test20 == [{defined_list,[{integer,[1]},{integer,[2]}]}]}).
 
 g(List) -> 
-	generalize_list_type(List, [], default).
+	generalize_list_type2(List, []).
 
 c(Value) ->
 	convert_value_in_basic_format_to_compound(Value).
