@@ -22,6 +22,7 @@
 
 
 %Pay attention that the index values and the order number of elements in the POSSIBLE_TYPES macros has to match.
+-define(ANY_INDEX, 1).
 -define(BOOLS_INDEX, 2).
 -define(NUMS_INDEX, 3).
 -define(ATOMS_INDEX, 4).
@@ -317,15 +318,18 @@ generalize_list_type2({_Type, Elems}, [])->
 	generalize_list_type2({non_empty_list, Elems}, ?POSSIBLE_TYPES);
 
 %improper list
-generalize_list_type2({List_type, {Type, Value}}, Possible_types) ->
+generalize_list_type2(List = {List_type, {Type, Value}}, Possible_types) ->
 	Improp_elem = generalize_type({Type, Value}),
 
 	Possible_types_in_list = tuple_to_list(Possible_types),
-	{Gen_list_type, Elems} = build_list(List_type, Possible_types_in_list, []),
+	{Gen_list_type, Gen_Elems} = build_list(List_type, Possible_types_in_list, []),
 	{improper_part, Improp_elems} = element(?IMPROPER_PART_INDEX, Possible_types),
 	{improper_part, Upd_improp_elems} = generalize_improper_part(Improp_elem, {improper_part, Improp_elems}),
+	{_, [{_, Elems}]} = element(?LISTS_INDEX, Possible_types),
+	Upd_lst_type = generalize_two_lists()
 
-	{{Gen_list_type, Elems ++ Upd_improp_elems}, setelement(?IMPROPER_PART_INDEX, Possible_types, {improper_part, Upd_improp_elems})};
+
+	{{Upd_lst_type, Gen_Elems ++ Upd_improp_elems}, setelement(?IMPROPER_PART_INDEX, Upd_possible_types, {improper_part, Upd_improp_elems})};
 
 generalize_list_type2({List_type, []}, Possible_types) ->
 	Possible_types_in_list = tuple_to_list(Possible_types),
@@ -339,12 +343,13 @@ generalize_list_type2({List_type, []}, Possible_types) ->
 		                     {Gen_list, setelement(?IMPROPER_PART_INDEX, Possible_types, {improper_part, Upd_improp_elems})}
 	end;
 
-generalize_list_type2({List_type, [_ | T]}, Possible_types) when element(1, Possible_types) == {any, [{any, []}]} ->
-	generalize_list_type2({List_type, T}, Possible_types);
+generalize_list_type2({List_type, [_ | T]}, Possible_types) when element(?ANY_INDEX, Possible_types) == {any, [{any, []}]} ->
+	generalize_list_type2({non_empty_list, T}, Possible_types);
 
 %nonempty_maybe_improper_list
 generalize_list_type2({non_empty_list, [{'...', Value}]}, Possible_types) ->
-	{{nonempty_maybe_improper_list, []}, Possible_types};
+	Upd_possible_types = setelement(?LISTS_INDEX, Possible_types, {nonempty_maybe_improper_list, []}),
+	{{nonempty_maybe_improper_list, []}, Upd_possible_types};
 
 generalize_list_type2({List_type, [{variable, Value} | T]}, Possible_types) ->
 	Upd_possible_types = setelement(1, ?POSSIBLE_TYPES, {any, [{any, []}]}),
@@ -441,9 +446,14 @@ generalize_numbers({Num_type, [Value]}, {Gen_type, Values}) ->
 generalize_lists(List, {lists, []}) ->
 	{{List_type, Elems}, Possible_types} = generalize_list_type2(List, []),
 	{lists, [{List_type, Possible_types}]};
-generalize_lists({List_type, Elems}, {lists, [{Gen_list_type, Prev_lst_possible_types}]}) ->
+generalize_lists({List_type, Elems}, {lists, [{Gen_list_type, Prev_lst_possible_types}]}) when (Gen_list_type == maybe_improper_list) or (Gen_list_type == nonempty_maybe_improper_list) ->
 	{{New_list_type, _}, New_possible_types} = generalize_list_type2({List_type, Elems}, Prev_lst_possible_types),
-	New_gen_list_type = generalize_two_lists(Gen_list_type, New_list_type),
+	New_gen_list_type = generalize_two_lists(New_list_type, Gen_list_type),
+	{lists, [{New_gen_list_type, ?POSSIBLE_TYPES}]};
+generalize_lists({List_type, Elems}, {lists, [{Gen_list_type, Prev_lst_possible_types}]}) ->
+	erlang:display(Prev_lst_possible_types),
+	{{New_list_type, _}, New_possible_types} = generalize_list_type2({List_type, Elems}, Prev_lst_possible_types),
+	New_gen_list_type = generalize_two_lists(New_list_type, Gen_list_type),
 	{lists, [{New_gen_list_type, New_possible_types}]}.
 
 
@@ -458,9 +468,9 @@ build_list(List_type, [{improper_part, Elems_type}], Res) ->
 			_ -> [{union, Elems_type}]
 		end,
 
-	case length(List) of
-		1 -> {List_type, List ++ Improper_part};
-		_ -> {List_type, [{union, List}] ++ Improper_part}
+	case length(List) > 1 of
+		false -> {List_type, List ++ Improper_part};
+		true -> {List_type, [{union, List}] ++ Improper_part}
 	end;
 build_list(List_type, [{_Label, []} | T], Res) ->
 	build_list(List_type, T, Res);
@@ -472,13 +482,6 @@ build_list(List_type, [{lists, [{Pos_list_type, Elems_type}]} | T], Res) ->
 	build_list(List_type, T, [[List] | Res]);
 build_list(List_type, [{_Label, Type} | T], Res) ->
 	build_list(List_type, T, [Type | Res]).
-
-
-
-
-
-
-
 
 
 
@@ -518,6 +521,8 @@ generalize_two_lists(nonempty_improper_list, non_empty_list) ->
 	nonempty_maybe_improper_list;	
 generalize_two_lists(non_empty_list, nonempty_improper_list) ->
 	nonempty_maybe_improper_list.
+
+
 
 
 
