@@ -32,7 +32,7 @@
 -define(IMPROPER_PART_INDEX, 7). 
 
 -define(POSSIBLE_TYPES, {
-		{any, []}, {bools, []}, {nums, []}, {atoms, []}, {lists, []} ,{tuples, []}, {improper_part, []}
+		{any, []}, {bools, []}, {nums, []}, {atoms, []}, {lists, []}, {tuples, []}, {improper_part, []}
 	}).
 
 infer_fun_type(Mod_name, Fun_name, Arity, Variables) ->
@@ -288,6 +288,12 @@ bound_cons(Leftside_cons, Rightside_expr, Variables) ->
 		false -> {none, []}
 	end.
 
+generate_type_value_table([], []) -> 
+	[];
+generate_type_value_table([Elem | Elems], [Occur_values_for_elem | Occur_values]) ->
+	Upd_occur_values = generalize_elem(Elem, Occur_values_for_elem),
+	[Upd_occur_values | generate_type_value_table(Elems, Occur_values)].
+
 generalize_elems([], Possible_types) ->
 	Possible_types_in_list = tuple_to_list(Possible_types),
 	Generalized_elems = build_type_info(Possible_types_in_list, []),
@@ -296,8 +302,8 @@ generalize_elems([Elem | Elems], Possible_types) ->
 	Upd_possible_types = generalize_elem(Elem, Possible_types),
 	generalize_elems(Elems, Upd_possible_types).
 
-%ge(A) ->
-%	generalize_elems(A, ?POSSIBLE_TYPES).
+ge(A) ->
+	generalize_elems(A, ?POSSIBLE_TYPES).
 
 build_type_info([], Res) ->
 	Type_info = lists:reverse(lists:concat(Res)),
@@ -309,6 +315,7 @@ build_type_info([], Res) ->
 	end;
 build_type_info([{_Label, []} | T], Res) ->
 	build_type_info(T, Res);
+
 build_type_info([{lists, [List = {Pos_list_type, []}]} | T], Res) ->
 	build_type_info(T, [[List | Res]]);
 build_type_info([{lists, [{Pos_list_type, Elems_type}]} | T], Res) ->
@@ -325,7 +332,21 @@ generalize_elem({El_type, El_value}, Possible_types) when ((El_type == neg_integ
 generalize_elem({El_type, El_value}, Possible_types) when El_type == atom ->
 	generalize_elem_by_index({El_type, El_value}, Possible_types, ?ATOMS_INDEX);
 generalize_elem({El_type, El_value}, Possible_types) when (El_type == empty_list) or (El_type == improper_list) or (El_type == defined_list) or (El_type == non_empty_list) ->
-	generalize_elem_by_index({El_type, El_value}, Possible_types, ?LISTS_INDEX).
+	generalize_elem_by_index({El_type, El_value}, Possible_types, ?LISTS_INDEX);
+generalize_elem({El_type, El_value}, Possible_types) when El_type == tuple ->
+	generalize_elem_by_index({El_type, El_value}, Possible_types, ?TUPLES_INDEX);	
+
+
+update_tuple_in_tvt({tuple, Elems}, Occur_values) when (Occur_values == {tuple, []}) or (Occur_values == []) ->
+	Elems_num = length(Elems),
+	Upd_occur_vals = generate_type_value_table(Elems, lists:duplicate(Elems_num, ?POSSIBLE_TYPES)),
+	{tuple, [Upd_occur_vals]};	
+update_tuple_in_tvt({tuple, Elems}, {tuple, [Tp_val_tbl | Tp_val_tbls]}) ->
+	case length(Elems) == length(Tp_val_tbl) of
+		true  -> Upd_tp_val_tbl = generate_type_value_table(Elems, Tp_val_tbl),
+			     [Upd_tp_val_tbl | Tp_val_tbls];
+		false -> update_tuple_in_tvt({tuple, Elems}, Tp_val_tbls)
+	end.
 
 generalize_elem_by_index({Type, Value}, Possible_types, Index) ->
 	Elem = element(Index, Possible_types),
@@ -336,7 +357,7 @@ generalize_elem_by_index({Type, Value}, Possible_types, Index) ->
 		?NUMS_INDEX -> generalize_numbers({Type, Value}, Elem);
 		?ATOMS_INDEX -> generalize_atoms({Type, Value}, Elem);
 		?LISTS_INDEX -> generalize_lists({Type, Value}, Elem)
-		%?TUPLES_INDEX -> generalize_tuple({Type, Value}, Elem)
+		?TUPLES_INDEX -> update_tuple_in_tvt({Type, Value}, Elem)
 	end,
 		
 	setelement(Index, Possible_types, Gen_elem_values).
@@ -413,12 +434,6 @@ generalize_improper_part(Improp_elem, {improper_part, Elems}) ->
 		true  -> {improper_part, Elems};
 		false -> {improper_part, [Improp_elem | Elems]}
 	end.
-
-generalize_tuple({tuple, Elems}, {tuple, [{Length, Gen_Elem} | Gen_elems]}) ->
-	case length(Elems) == Length of
-		true -> generalize_elems(Elems)
-
-generalize_tuple_elem()
 
 generalize_bools(Boolean, {bools, []}) ->
 	{bools, [Boolean]};
