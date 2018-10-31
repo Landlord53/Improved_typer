@@ -31,7 +31,7 @@
 %Pay attention that the IMPROPER_PART_INDEX has to be always the last element of the POSSIBLE_TYPES macros.
 -define(IMPROPER_PART_INDEX, 7). 
 
--define(POSSIBLE_TYPES, {
+-define(ELEMS_TBL, {
 		{any, []}, {bools, []}, {nums, []}, {atoms, []}, {lists, []}, {tuples, []}, {improper_part, []}
 	}).
 
@@ -288,42 +288,38 @@ bound_cons(Leftside_cons, Rightside_expr, Variables) ->
 		false -> {none, []}
 	end.
 
-generate_type_value_table([], []) -> 
-	[];
-generate_type_value_table([Elem | Elems], [Occur_values_for_elem | Occur_values]) ->
-	Upd_occur_values = generalize_elem(Elem, Occur_values_for_elem),
-	[Upd_occur_values | generate_type_value_table(Elems, Occur_values)].
-
 generalize_elems([], Possible_types) ->
 	Possible_types_in_list = tuple_to_list(Possible_types),
-	Generalized_elems = build_type_info(Possible_types_in_list, []),
+	Generalized_elems = convert_tvt_to_internal_format(Possible_types_in_list, []),
 	{Generalized_elems, Possible_types};
 generalize_elems([Elem | Elems], Possible_types) ->
 	Upd_possible_types = generalize_elem(Elem, Possible_types),
 	generalize_elems(Elems, Upd_possible_types).
 
 ge(A) ->
-	generalize_elems(A, ?POSSIBLE_TYPES).
+	generalize_elems(A, ?ELEMS_TBL).
 
-build_type_info([], Res) ->
+convert_tvt_to_internal_format([], Res) ->
 	Type_info = lists:reverse(lists:concat(Res)),
 
 	case length(Type_info) of
 		0 -> [];
-		1 -> Type_info;
+		1 -> hd(Type_info);
 		_ -> {union, Type_info}
 	end;
-build_type_info([{_Label, []} | T], Res) ->
-	build_type_info(T, Res);
-
-build_type_info([{lists, [List = {Pos_list_type, []}]} | T], Res) ->
-	build_type_info(T, [[List | Res]]);
-build_type_info([{lists, [{Pos_list_type, Elems_type}]} | T], Res) ->
+convert_tvt_to_internal_format([{_Label, []} | T], Res) ->
+	convert_tvt_to_internal_format(T, Res);	
+convert_tvt_to_internal_format([{tuples, Tvts} | T], Res) ->
+	Tuples = generate_tuples_from_tvt({tuples, Tvts}, []),
+	convert_tvt_to_internal_format(T, [Tuples | Res]);
+convert_tvt_to_internal_format([{lists, [List = {Pos_list_type, []}]} | T], Res) ->
+	convert_tvt_to_internal_format(T, [[List | Res]]);
+convert_tvt_to_internal_format([{lists, [{Pos_list_type, Elems_type}]} | T], Res) ->
 	Elems_type_in_list = tuple_to_list(Elems_type),
 	List = build_list(Pos_list_type, Elems_type_in_list, []),
-	build_type_info(T, [[List] | Res]);
-build_type_info([{_Label, Type} | T], Res) ->
-	build_type_info(T, [Type | Res]).
+	convert_tvt_to_internal_format(T, [[List] | Res]);
+convert_tvt_to_internal_format([{_Label, Type} | T], Res) ->
+	convert_tvt_to_internal_format(T, [Type | Res]).
 
 generalize_elem({El_type, El_value}, Possible_types) when El_type == boolean ->
 	generalize_elem_by_index({El_type, El_value}, Possible_types, ?BOOLS_INDEX);
@@ -334,19 +330,41 @@ generalize_elem({El_type, El_value}, Possible_types) when El_type == atom ->
 generalize_elem({El_type, El_value}, Possible_types) when (El_type == empty_list) or (El_type == improper_list) or (El_type == defined_list) or (El_type == non_empty_list) ->
 	generalize_elem_by_index({El_type, El_value}, Possible_types, ?LISTS_INDEX);
 generalize_elem({El_type, El_value}, Possible_types) when El_type == tuple ->
-	generalize_elem_by_index({El_type, El_value}, Possible_types, ?TUPLES_INDEX);	
+	generalize_elem_by_index({El_type, El_value}, Possible_types, ?TUPLES_INDEX).	
 
-
-update_tuple_in_tvt({tuple, Elems}, Occur_values) when (Occur_values == {tuple, []}) or (Occur_values == []) ->
+update_tuple_in_tvt({tuple, Elems}, {tuples, []}) ->
 	Elems_num = length(Elems),
-	Upd_occur_vals = generate_type_value_table(Elems, lists:duplicate(Elems_num, ?POSSIBLE_TYPES)),
-	{tuple, [Upd_occur_vals]};	
-update_tuple_in_tvt({tuple, Elems}, {tuple, [Tp_val_tbl | Tp_val_tbls]}) ->
-	case length(Elems) == length(Tp_val_tbl) of
-		true  -> Upd_tp_val_tbl = generate_type_value_table(Elems, Tp_val_tbl),
-			     [Upd_tp_val_tbl | Tp_val_tbls];
-		false -> update_tuple_in_tvt({tuple, Elems}, Tp_val_tbls)
+	Upd_tvt = update_tvt_pairwise(Elems, lists:duplicate(Elems_num, ?ELEMS_TBL)),
+	{tuples, [Upd_tvt]};
+update_tuple_in_tvt({tuple, Elems}, {tuples, Tvts}) ->
+	{tuples, update_elems_in_tvt(Elems, Tvts)}.
+
+update_elems_in_tvt(Elems, []) ->
+	Elems_num = length(Elems),
+	Upd_tvt = update_tvt_pairwise(Elems, lists:duplicate(Elems_num, ?ELEMS_TBL)),
+	[Upd_tvt];
+update_elems_in_tvt(Elems, [Tvt | Tvts]) ->
+	case length(Elems) == length(Tvt) of
+		true  -> [update_tvt_pairwise(Elems, Tvt) | Tvts];
+		false -> [Tvt | update_elems_in_tvt(Elems, Tvts)]
 	end.
+
+update_tvt_pairwise([], []) -> 
+	[];
+update_tvt_pairwise([Elem | Elems], [Tvt | Tvts]) when (element(1, Tvt) == {any, [{any, []}]}) ->
+	[Tvt | update_tvt_pairwise(Elems, Tvts)];
+update_tvt_pairwise([{variable, _} | Elems], [Tvt | Tvts]) ->
+	Upd_tvt = setelement(1, ?ELEMS_TBL, {any, [{any, []}]}),
+	[Upd_tvt | update_tvt_pairwise(Elems, Tvts)];
+update_tvt_pairwise([Elem | Elems], [Tvt | Tvts]) ->
+	Upd_tvt = generalize_elem(Elem, Tvt),
+	[Upd_tvt | update_tvt_pairwise(Elems, Tvts)].
+
+generate_tuples_from_tvt({tuples, []}, Res) ->
+	Res;
+generate_tuples_from_tvt({tuples, [Tuple_tvt | Tuples_tvts]}, Res) ->
+	{_, Elems} = {tuple, lists:map(fun(Tvt) -> convert_tvt_to_internal_format(tuple_to_list(Tvt), []) end, Tuple_tvt)},
+	generate_tuples_from_tvt({tuples, Tuples_tvts}, [{tuple, Elems} | Res]).
 
 generalize_elem_by_index({Type, Value}, Possible_types, Index) ->
 	Elem = element(Index, Possible_types),
@@ -356,10 +374,12 @@ generalize_elem_by_index({Type, Value}, Possible_types, Index) ->
 		?BOOLS_INDEX -> generalize_bools({Type, Value}, Elem);
 		?NUMS_INDEX -> generalize_numbers({Type, Value}, Elem);
 		?ATOMS_INDEX -> generalize_atoms({Type, Value}, Elem);
-		?LISTS_INDEX -> generalize_lists({Type, Value}, Elem)
+		?LISTS_INDEX -> generalize_lists({Type, Value}, Elem);
 		?TUPLES_INDEX -> update_tuple_in_tvt({Type, Value}, Elem)
 	end,
-		
+
+	%erlang:display(Gen_elem_values),
+	
 	setelement(Index, Possible_types, Gen_elem_values).
 
 generalize_list_elems_by_index({List_type, [{El_type, El_value} | T]}, Possible_types, Index) ->
@@ -377,7 +397,7 @@ generalize_list_type(Empty_list = {empty_list, []}, Possible_types) ->
 	{Empty_list, Possible_types};
 
 generalize_list_type({_Type, Elems}, [])->
-	generalize_list_type({non_empty_list, Elems}, ?POSSIBLE_TYPES);
+	generalize_list_type({non_empty_list, Elems}, ?ELEMS_TBL);
 
 %improper list
 generalize_list_type(List = {List_type, {Type, Value}}, Possible_types) ->
@@ -412,7 +432,7 @@ generalize_list_type({non_empty_list, [{'...', Value}]}, Possible_types) ->
 	{{undef_nonempty_maybe_improper_list, []}, Upd_possible_types};
 
 generalize_list_type({List_type, [{variable, Value} | T]}, Possible_types) ->
-	Upd_possible_types = setelement(1, ?POSSIBLE_TYPES, {any, [{any, []}]}),
+	Upd_possible_types = setelement(1, ?ELEMS_TBL, {any, [{any, []}]}),
 	generalize_list_type({List_type, T}, Upd_possible_types);
 
 generalize_list_type(List = {List_type, [{El_type, El_value} | T]}, Possible_types) when El_type == boolean ->
@@ -425,7 +445,9 @@ generalize_list_type(List = {List_type, [{El_type, El_value} | T]}, Possible_typ
 	generalize_list_elems_by_index(List, Possible_types, ?ATOMS_INDEX);
 
 generalize_list_type(List = {List_type, [{El_type, El_value} | T]}, Possible_types) when (El_type == empty_list) or (El_type == improper_list) or (El_type == defined_list) or (El_type == non_empty_list) ->
-	generalize_list_elems_by_index(List, Possible_types, ?LISTS_INDEX).
+	generalize_list_elems_by_index(List, Possible_types, ?LISTS_INDEX);
+generalize_list_type(List = {List_type, [{El_type, El_value} | T]}, Possible_types) when El_type == tuple -> 
+	generalize_list_elems_by_index(List, Possible_types, ?TUPLES_INDEX).
 
 generalize_improper_part(Improp_elem, {improper_part, []}) ->
 	{improper_part, [Improp_elem]};
@@ -508,7 +530,7 @@ generalize_lists(List, {lists, []}) ->
 generalize_lists({List_type, Elems}, {lists, [{Gen_list_type, Prev_lst_possible_types}]}) when (Gen_list_type == undef_maybe_improper_list) or (Gen_list_type == undef_nonempty_maybe_improper_list) ->
 	{{New_list_type, _}, New_possible_types} = generalize_list_type({List_type, Elems}, Prev_lst_possible_types),
 	New_gen_list_type = generalize_two_lists(New_list_type, Gen_list_type),
-	{lists, [{New_gen_list_type, ?POSSIBLE_TYPES}]};
+	{lists, [{New_gen_list_type, ?ELEMS_TBL}]};
 generalize_lists({List_type, Elems}, {lists, [{Gen_list_type, Prev_lst_possible_types}]}) ->
 	{{New_list_type, _}, New_possible_types} = generalize_list_type({List_type, Elems}, Prev_lst_possible_types),
 	New_gen_list_type = generalize_two_lists(New_list_type, Gen_list_type),
@@ -516,7 +538,6 @@ generalize_lists({List_type, Elems}, {lists, [{Gen_list_type, Prev_lst_possible_
 
 build_list(List_type, [{improper_part, Elems_type}], Res) ->
 	List = lists:reverse(lists:concat(Res)),
-
 	Improper_part = 
 		case Elems_type of
 			[] -> [];
@@ -531,6 +552,10 @@ build_list(List_type, [{improper_part, Elems_type}], Res) ->
 	end;
 build_list(List_type, [{_Label, []} | T], Res) ->
 	build_list(List_type, T, Res);
+build_list(List_type, [{tuples, Tvts} | T], Res) ->
+	%erlang:display(Tvts),
+	Tuples = generate_tuples_from_tvt({tuples, Tvts}, []),
+	build_list(List_type, T, [Tuples | Res]);
 build_list(List_type, [{lists, [{Pos_list_type, []}]} | T], Res) ->
 	build_list(List_type, T, [[{Pos_list_type, []}] | Res]);
 build_list(List_type, [{lists, [{Pos_list_type, Elems_type}]} | T], Res) ->
@@ -1367,8 +1392,40 @@ test() ->
 	T38 = c([[1,2, {'...', ["A"]}], [3,4], ok]),
 	Test38 = g(T38),	
 	erlang:display({test38, Test38 == {non_empty_list,[{union,[{atom,[ok]},
-                         				{undef_nonempty_maybe_improper_list,[]}]}]}}).
+                         				{undef_nonempty_maybe_improper_list,[]}]}]}}),
 
+	T39 = c([ok, [1,2], {a, b}, {[c, d], {1, 2}}, {true,false, daa}]),
+	Test39 = g(T39),	
+	erlang:display({test39, Test39 == {non_empty_list,
+				    [{union,
+				         [{atom,[ok]},
+				          {non_empty_list,[{union,[{integer,[1]},{integer,[2]}]}]},
+				          {tuple,
+				              [{union,
+				                   [{atom,[a]},
+				                    {non_empty_list,[{union,[{atom,[c]},{atom,[d]}]}]}]},
+				               {union,[{atom,[b]},{tuple,[{integer,[1]},{integer,[2]}]}]}]},
+				          {tuple,
+				              [{boolean,[true]},{boolean,[false]},{atom,[daa]}]}]}]}}),
+
+	T40 = c([{{1,2}, {3,4}, {5,6,7}}]),
+	Test40 = g(T40),	
+	erlang:display({test40, Test40 == {non_empty_list,[{tuple,[{tuple,[{integer,[1]},
+		                                 {integer,[2]}]},
+		                         {tuple,[{integer,[3]},{integer,[4]}]},
+		                         {tuple,[{integer,[5]},
+		                                 {integer,[6]},
+		                                 {integer,[7]}]}]}]}}),
+
+	T41 = c([{2,3,{variable, ["A"]}}, {2,3}, {ok, at, true}]),
+	Test41 = g(T41),	
+	erlang:display({test41, Test41 == {non_empty_list,
+							    [{union,
+							         [{tuple,
+							              [{union,[{integer,[2]},{atom,[ok]}]},
+							               {union,[{integer,[3]},{atom,[at]}]},
+							               {any,[]}]},
+							          {tuple,[{integer,[2]},{integer,[3]}]}]}]}}).
 
 g(List) -> 
 	{Res, _} = generalize_list_type(List, []),
