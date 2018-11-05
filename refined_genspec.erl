@@ -548,44 +548,40 @@ generalize_numbers({Num_type, [Value]}, {Gen_type, Values}) ->
 		false -> {Num_type, [{Num_type, [Value]} | Values]}
 	end.
 
+%check
 upd_lists_section_with_gen_lst({Lst_type, [{union, U_elems}]}, Lists_section) ->
 	upd_lists_section_with_ungen_lst({Lst_type, U_elems}, Lists_section);
-
-upd_lists_section_with_gen_lst({Lst_type, [{union, U_elems}, Improp_elem]}, Lists_section) ->
-	case Lists_section of
-	    {lists, []}                          -> Upd_improp_part = generalize_improper_part(Improp_elem, {improper_part, []}),
-	                           					Upd_elems_tbl = setelement(?IMPROPER_PART_INDEX, ?ELEMS_TBL, Upd_improp_part), 
-							       				upd_lists_section_with_ungen_lst({Lst_type, U_elems ++ Improp_elem}, {lists, [{Lst_type, Upd_elems_tbl}]});
-	   	{lists, [{Gen_lst_type, Lst_elems_tbl}]} -> Improper_part = element(?IMPROPER_PART_INDEX, Lst_elems_tbl),
-	   												Upd_improp_part = generalize_improper_part(Improp_elem, Improper_part),
-	   												Upd_elems_tbl = setelement(?IMPROPER_PART_INDEX, Upd_improp_part, Lst_elems_tbl),
-	   												upd_lists_section_with_ungen_lst({Lst_type, U_elems ++ Improp_elem}, {lists, [{Gen_lst_type, Upd_elems_tbl}]})
-   end;
+%check
 upd_lists_section_with_gen_lst({Lst_type, [{union, U_elems}, {union, Improp_elems}]}, Lists_section) ->
 	case Lists_section of
 	    {lists, []}                          -> Upd_improp_part = generalize_improp_elems(Improp_elems, {improper_part, []}),
 	                           					Upd_elems_tbl = setelement(?IMPROPER_PART_INDEX, ?ELEMS_TBL, Upd_improp_part), 
 							       				upd_lists_section_with_ungen_lst({Lst_type, U_elems ++ hd(Improp_elems)}, {lists, [{Lst_type, Upd_elems_tbl}]});
 	   	{lists, [{Gen_lst_type, Lst_elems_tbl}]} -> Improper_part = element(?IMPROPER_PART_INDEX, Lst_elems_tbl),
-	   											Upd_improp_part = generalize_improp_elems(Improp_elems, Improper_part),
-	   											Upd_elems_tbl = setelement(?IMPROPER_PART_INDEX, Upd_improp_part, Lst_elems_tbl),
-	   											upd_lists_section_with_ungen_lst({Lst_type, U_elems ++ hd(Improp_elems)}, {lists, [{Gen_lst_type, Upd_elems_tbl}]})
+		   											Upd_improp_part = generalize_improp_elems(Improp_elems, Improper_part),
+		   											Upd_elems_tbl = setelement(?IMPROPER_PART_INDEX, Lst_elems_tbl, Upd_improp_part),
+		   											upd_lists_section_with_ungen_lst({Lst_type, U_elems ++ hd(Improp_elems)}, {lists, [{Gen_lst_type, Upd_elems_tbl}]})
 	end;
-upd_lists_section_with_gen_lst(List = {Lst_type, [{Type, Value}]}, Lists_section) ->
-	{_, Upd_elems_tbl} = 
-		case Lists_section of
-			{lists, []}                  -> generalize_list(List, ?ELEMS_TBL);
-			{lists, [{Type, Lst_elems_tbl}]} -> generalize_list(List, Lst_elems_tbl)
-		end,
-	{lists, [{Lst_type, Upd_elems_tbl}]};
+%check
+upd_lists_section_with_gen_lst({Lst_type, [{Type, Value}, {union, Improp_elems}]}, Lists_section) ->
+	case Lists_section of
+	    {lists, []}                          -> Upd_improp_part = generalize_improp_elems(Improp_elems, {improper_part, []}),
+	                           					Upd_elems_tbl = setelement(?IMPROPER_PART_INDEX, ?ELEMS_TBL, Upd_improp_part), 
+							       				upd_lists_section_with_ungen_lst({Lst_type, [{Type, Value}] ++ hd(Improp_elems)}, {lists, [{Lst_type, Upd_elems_tbl}]});
+	   	{lists, [{Gen_lst_type, Lst_elems_tbl}]} -> Improper_part = element(?IMPROPER_PART_INDEX, Lst_elems_tbl),
+		   											Upd_improp_part = generalize_improp_elems(Improp_elems, Improper_part),
+		   											Upd_elems_tbl = setelement(?IMPROPER_PART_INDEX, Lst_elems_tbl, Upd_improp_part),
+		   											upd_lists_section_with_ungen_lst({Lst_type, [{Type, Value}] ++ hd(Improp_elems)}, {lists, [{Gen_lst_type, Upd_elems_tbl}]})
+	end;
+%Check
+upd_lists_section_with_gen_lst({Lst_type, [{union, U_elems}, Improp_elem]}, Lists_section) ->
+   	upd_lists_section_with_ungen_lst({Lst_type, U_elems ++ Improp_elem}, Lists_section);
+%Check
 upd_lists_section_with_gen_lst(List = {Lst_type, [{Type, Value}, Improp_elem]}, Lists_section) ->
-	erlang:display(Lists_section),
-	{_, Upd_elems_tbl} = 
-		case Lists_section of
-			{lists, []}                      -> generalize_list({Lst_type, [{Type, Value} | Improp_elem]}, ?ELEMS_TBL);
-			{lists, [{Type, Lst_elems_tbl}]} -> generalize_list({Lst_type, [{Type, Value} | Improp_elem]}, Lst_elems_tbl)
-		end,
-	{lists, [{Lst_type, Upd_elems_tbl}]}.
+	upd_lists_section_with_ungen_lst({Lst_type, [{Type, Value} | Improp_elem]}, Lists_section);
+%Check
+upd_lists_section_with_gen_lst(List = {Lst_type, [{Type, Value}]}, Lists_section) ->
+	upd_lists_section_with_ungen_lst(List, Lists_section).
 
 upd_lists_section_with_ungen_lst(List, {lists, []}) ->
 	{{List_type, Elems}, Elems_tbl} = generalize_list(List, ?ELEMS_TBL),
@@ -1495,7 +1491,115 @@ test() ->
 									          {tuple,
 									              [{union,[{atom,[ok]},{atom,[da]}]},
 									               {union,[{boolean,[true]},{atom,[net]}]}]}]},
-									     [{tuple,[{integer,[3]},{integer,[4]},{integer,[5]}]}]]}}).
+									     [{tuple,[{integer,[3]},{integer,[4]},{integer,[5]}]}]]}}),
+
+	A43 = refined_genspec:c([1,2]),
+	B43 = refined_genspec:g(A43),
+	C43 = refined_genspec:c([B43, [2,3,4,5]]),
+	Test43 = refined_genspec:g(C43),
+	erlang:display({test43, Test43 == {nonempty_list,
+									    [{nonempty_list,
+									         [{union,
+									              [{integer,[1]},
+									               {integer,[2]},
+									               {integer,[3]},
+									               {integer,[4]},
+									               {integer,[5]}]}]}]}}),
+
+	A44 = refined_genspec:c([1]),
+	B44 = refined_genspec:g(A44),
+	C44 = refined_genspec:c([[2,3,4,5], B44]),
+	Test44 = refined_genspec:g(C44),
+	erlang:display({test44, Test44 == {nonempty_list,
+									    [{nonempty_list,
+									         [{union,
+									              [{integer,[2]},
+									               {integer,[3]},
+									               {integer,[4]},
+									               {integer,[5]},
+									               {integer,[1]}]}]}]}}),
+
+	A45 = refined_genspec:c([ok, true | 1]),
+	B45 = refined_genspec:g(A45),
+	C45 = refined_genspec:c([[2,3,4], B45]),
+	Test45 = refined_genspec:g(C45),
+	erlang:display({test45, Test45 == {nonempty_list,
+										    [{nonempty_maybe_improper_list,
+										         [{union,
+										              [{boolean,[true]},
+										               {integer,[2]},
+										               {integer,[3]},
+										               {integer,[4]},
+										               {atom,[ok]}]},
+										          {union,[{integer,[1]},{empty_list,[]}]}]}]}}),
+	A46 = refined_genspec:c([[ok | 1], [ok | 2]]),
+	B46 = refined_genspec:g(A46),
+	C46 = refined_genspec:c([[[2,3,4]], B46]),
+	Test46 = refined_genspec:g(C46),
+	erlang:display({test46, Test46 == {nonempty_list,
+									    [{nonempty_list,
+									         [{nonempty_maybe_improper_list,
+									              [{union,
+									                   [{integer,[2]},{integer,[3]},{integer,[4]},{atom,[ok]}]},
+									               {union,[{integer,[1]},{integer,[2]},{empty_list,[]}]}]}]}]}}),
+
+	A47 = refined_genspec:c([[true, false, error | 1], [ok | 2]]),
+	B47 = refined_genspec:g(A47),
+	C47 = refined_genspec:c([[[2,3,4]], B47]),
+	Test47 = refined_genspec:g(C47),
+	erlang:display({test47, Test47 == {nonempty_list,
+									    [{nonempty_list,
+									         [{nonempty_maybe_improper_list,
+									              [{union,
+									                   [{boolean,[]},
+									                    {integer,[2]},
+									                    {integer,[3]},
+									                    {integer,[4]},
+									                    {atom,[error]},
+									                    {atom,[ok]}]},
+									               {union,[{integer,[1]},{integer,[2]},{empty_list,[]}]}]}]}]}}),
+
+	A48 = refined_genspec:c([[true, false, {number, []} | 1], [ok | 1]]),
+	B48 = refined_genspec:g(A48),
+	C48 = refined_genspec:c([[[2,3,4]], B48]),
+	Test48 = refined_genspec:g(C48),
+	erlang:display({test48, Test48 == {nonempty_list,
+									    [{nonempty_list,
+									         [{nonempty_maybe_improper_list,
+									              [{union,[{boolean,[]},{number,[]},{atom,[ok]}]},
+									               {union,[{integer,[1]},{empty_list,[]}]}]}]}]}}),
+
+	A49 = refined_genspec:c([1 | 2]),
+	B49 = refined_genspec:g(A49),
+	C49 = refined_genspec:c([[3 | 4], B49]),
+	Test49 = refined_genspec:g(C49),
+	erlang:display({test49, Test49 == {nonempty_list,
+									    [{nonempty_improper_list,
+									         [{union,[{integer,[3]},{integer,[1]}]},
+									          {union,[{integer,[2]},{integer,[4]}]}]}]}}),
+
+	A50 = refined_genspec:c([[1,2 | 3], [[4,5,6], []] | 7]),
+	B50 = refined_genspec:g(A50),
+	C50 = refined_genspec:c([[er, da | ok], B50]),
+	Test50 = refined_genspec:g(C50),
+	erlang:display({test50, Test50 == {nonempty_list,
+									    [{nonempty_improper_list,
+									         [{union,
+									              [{atom,[er]},
+									               {atom,[da]},
+									               {nonempty_maybe_improper_list, 
+									                   [{union,
+									                        [{integer,[1]},
+									                         {integer,[2]},
+									                         {list,
+									                             [{union,
+									                                  [{integer,[4]},
+									                                   {integer,[5]},
+									                                   {integer,[6]}]}]}]},
+									                    {union,[{integer,[3]},{empty_list,[]}]}]}]},
+									          {union,[{integer,[7]},{atom,[ok]}]}]}]}}).
+
+
 
 g(List) -> 
 	{Res, _} = generalize_list(List, ?ELEMS_TBL),
