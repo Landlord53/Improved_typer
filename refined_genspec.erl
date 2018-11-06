@@ -327,7 +327,12 @@ generalize_elem({El_type, El_value}, Elems_tbl) when ((El_type == neg_integer) o
 	upd_elems_tbl_by_index({El_type, El_value}, Elems_tbl, ?NUMS_INDEX);
 generalize_elem({El_type, El_value}, Elems_tbl) when El_type == atom ->
 	upd_elems_tbl_by_index({El_type, El_value}, Elems_tbl, ?ATOMS_INDEX);
-generalize_elem({El_type, El_value}, Elems_tbl) when (El_type == empty_list) or (El_type == ungen_list) ->
+generalize_elem({El_type, El_value}, Elems_tbl) when (El_type == empty_list) or (El_type == ungen_list)
+												  or (El_type == nonempty_list) or (El_type == improper_list)
+												  or (El_type == nonempty_improper_list) or (El_type == maybe_improper_list)
+												  or (El_type == nonempty_maybe_improper_list) or (El_type == list)
+												  or (El_type == undef_maybe_improper_list)
+												  or(El_type == undef_nonempty_maybe_improper_list) ->
 	upd_elems_tbl_by_index({El_type, El_value}, Elems_tbl, ?LISTS_INDEX);
 generalize_elem({El_type, El_value}, Elems_tbl) when El_type == tuple ->
 	upd_elems_tbl_by_index({El_type, El_value}, Elems_tbl, ?TUPLES_INDEX).	
@@ -366,6 +371,11 @@ generate_tuples_from_elems_tbl({tuples, [Tuple_elem_tbl | Tuples_elems_tbls]}, R
 	{_, Elems} = {tuple, lists:map(fun(Elems_tbl) -> convert_elems_tbl_to_internal_format(tuple_to_list(Elems_tbl), []) end, Tuple_elem_tbl)},
 	generate_tuples_from_elems_tbl({tuples, Tuples_elems_tbls}, [{tuple, Elems} | Res]).
 
+generalize_tuple(Tuple) ->
+	Upd_tuple_sec = update_tuple_in_elems_tbl(Tuple, {tuples, []}),
+	generate_tuples_from_elems_tbl(Upd_tuple_sec, []).
+
+
 
 upd_elems_tbl_by_index({Type, Elems}, Elems_tbl, Index) when (Type == nonempty_list) or (Type == improper_list)
 															  or (Type == nonempty_improper_list) or (Type == maybe_improper_list)
@@ -401,7 +411,7 @@ generalize_single_elem({Type, Value}) when (Type == ungen_list)
 										or (Type == nonempty_maybe_improper_list) or (Type == list)
 										or (Type == undef_maybe_improper_list)
 										or (Type == undef_nonempty_maybe_improper_list) -> 										
-	{Generalized_elem, _} = generalize_list({nonempty_list, [{Type, Value}]}, ?ELEMS_TBL),
+	{Generalized_elem, _} = generalize_list({Type, [{Type, Value}]}, ?ELEMS_TBL),
 	Generalized_elem;
 generalize_single_elem({Type, Value}) when Type == tuple ->
 	Elems_tbl = update_tuple_in_elems_tbl({Type, Value}, {tuples, []}),
@@ -455,6 +465,8 @@ generalize_list({List_type, []}, Elems_tbl) ->
 		end,
 		
 	{improper_part, Improp_elems} = element(?IMPROPER_PART_INDEX, Elems_tbl),
+
+	erlang:display(Improp_elems),
 
 	case Improp_elems of
 		[{empty_list, []}] -> {Gen_list, Elems_tbl};
