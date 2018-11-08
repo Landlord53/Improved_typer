@@ -33,6 +33,7 @@
 -define(TUPLES_SEC_INDEX, 6).
 %Pay attention that the IMPROPER_ELEMS_SEC_INDEX has to be always the last element of the POSSIBLE_TYPES macros.
 -define(IMPROPER_ELEMS_SEC_INDEX, 7). 
+-define(UNION_INDEX, 8).
 
 -define(ELEMS_TBL, {
 		{any, []}, {bools, []}, {nums, []}, {atoms, []}, {lists, []}, {tuples, []}, {improper_elems, []}
@@ -284,165 +285,154 @@ bound_cons(Leftside_cons, Rightside_expr, Variables) ->
 		false -> {none, []}
 	end.
 
+
+generalize_elems(Elems, []) ->
+	generalize_elems(Elems, ?ELEMS_TBL);
 generalize_elems([], Elems_tbl) ->
-	Elems_tbl_in_lst = tuple_to_list(Elems_tbl),
-	Generalized_elems = convert_elems_tbl_to_internal_format(Elems_tbl_in_lst, []),
-	{Generalized_elems, Elems_tbl};
+	Elems_tbl_secs = tuple_to_list(Elems_tbl),
+	Gen_elems = convert_elems_tbl_to_internal_format(Elems_tbl_secs, []),
+	{Gen_elems, Elems_tbl};
 generalize_elems([Elem | Elems], Elems_tbl) ->
-	Upd_elems_tbl = upd_elems_tbl_with_elem(Elem, Elems_tbl),
+	Upd_elems_tbl = upd_elems_tbl_with_new_elem(Elem, Elems_tbl),
 	generalize_elems(Elems, Upd_elems_tbl).
 
-convert_elems_tbl_to_internal_format([], Res) ->
-	Type_info = lists:reverse(lists:concat(Res)),
 
-	case length(Type_info) of
+convert_elems_tbl_to_internal_format([], Res) ->
+	Upd_res = lists:reverse(lists:concat(Res)),
+
+	case length(Upd_res) of
 		0 -> [];
-		1 -> hd(Type_info);
-		_ -> {union, Type_info}
+		1 -> hd(Upd_res);
+		_ -> {union, Upd_res}
 	end;
 convert_elems_tbl_to_internal_format([{_Label, []} | T], Res) ->
 	convert_elems_tbl_to_internal_format(T, Res);	
 convert_elems_tbl_to_internal_format([{tuples, Elems_tbl} | T], Res) ->
-	Tuples = generate_tuples_from_elems_tbl({tuples, Elems_tbl}, []),
+	Tuples = generate_tuples_from_tuple_tbl({tuples, Elems_tbl}, []),
 	convert_elems_tbl_to_internal_format(T, [Tuples | Res]);
-convert_elems_tbl_to_internal_format([{lists, [List = {Pos_list_type, []}]} | T], Res) ->
-	convert_elems_tbl_to_internal_format(T, [[List | Res]]);
-convert_elems_tbl_to_internal_format([{lists, [{Pos_list_type, Elems_type}]} | T], Res) ->
-	Elems_type_in_list = tuple_to_list(Elems_type),
-	List = build_list(Pos_list_type, Elems_type_in_list, []),
-	convert_elems_tbl_to_internal_format(T, [[List] | Res]);
-convert_elems_tbl_to_internal_format([{_Label, Type} | T], Res) ->
-	convert_elems_tbl_to_internal_format(T, [Type | Res]).
+convert_elems_tbl_to_internal_format([{lists, [Lst = {Lst_tp, []}]} | T], Res) ->
+	convert_elems_tbl_to_internal_format(T, [[Lst | Res]]);
+convert_elems_tbl_to_internal_format([{lists, [{Lst_tp, Elems_tbl}]} | T], Res) ->
+	Elems_tbl_secs = tuple_to_list(Elems_tbl),
+	Lst = build_list(Lst_tp, Elems_tbl_secs, []),
+	convert_elems_tbl_to_internal_format(T, [[Lst] | Res]);
+convert_elems_tbl_to_internal_format([{_Label, Tp} | T], Res) ->
+	convert_elems_tbl_to_internal_format(T, [Tp | Res]).
 
 
-upd_elems_tbl_with_elem({Elem_tp, Elem_val}, Elems_tbl) when Elem_tp == boolean ->
-	upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?BOOLS_SEC_INDEX);
-upd_elems_tbl_with_elem({Elem_tp, Elem_val}, Elems_tbl) when ((Elem_tp == neg_integer) 
-	                                                       or (Elem_tp == pos_integer) 
-	                                                       or (Elem_tp == non_neg_integer) 
-	                                                       or (Elem_tp == integer) 
-	                                                       or (Elem_tp == float) 
-	                                                       or (Elem_tp == number)) ->
+upd_elems_tbl_with_new_elem({union, Elem_val}, Elems_tbl) ->
+	upd_elems_tbl_with_new_elems(Elem_val, Elems_tbl);
+upd_elems_tbl_with_new_elem({boolean, Elem_val}, Elems_tbl) ->
+	upd_elems_tbl_by_index({boolean, Elem_val}, Elems_tbl, ?BOOLS_SEC_INDEX);
+upd_elems_tbl_with_new_elem({Elem_tp, Elem_val}, Elems_tbl) when (Elem_tp == neg_integer) or (Elem_tp == pos_integer) 
+	                                                          or (Elem_tp == non_neg_integer) or (Elem_tp == integer) 
+	                                                          or (Elem_tp == float) or (Elem_tp == number) ->
 	upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?NUMS_SEC_INDEX);
-
-upd_elems_tbl_with_elem({Elem_tp, Elem_val}, Elems_tbl) when Elem_tp == atom ->
+upd_elems_tbl_with_new_elem({Elem_tp, Elem_val}, Elems_tbl) when (Elem_tp == atom) ->
 	upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?ATOMS_SEC_INDEX);
-
-upd_elems_tbl_with_elem({Elem_tp, Elem_val}, Elems_tbl) when (Elem_tp == empty_list) or (Elem_tp == ungen_list)
-												          or (Elem_tp == nonempty_list) or (Elem_tp == improper_list)
-												          or (Elem_tp == nonempty_improper_list) or (Elem_tp == maybe_improper_list)
-												          or (Elem_tp == nonempty_maybe_improper_list) or (Elem_tp == list)
-												          or (Elem_tp == undef_maybe_improper_list)
-												          or (Elem_tp == undef_nonempty_maybe_improper_list) ->
+upd_elems_tbl_with_new_elem({Elem_tp, Elem_val}, Elems_tbl) when (Elem_tp == empty_list) or (Elem_tp == ungen_list)
+												              or (Elem_tp == nonempty_list) or (Elem_tp == improper_list)
+												              or (Elem_tp == nonempty_improper_list) or (Elem_tp == maybe_improper_list)
+												              or (Elem_tp == nonempty_maybe_improper_list) or (Elem_tp == list)
+												              or (Elem_tp == undef_maybe_improper_list)
+												              or (Elem_tp == undef_nonempty_maybe_improper_list) ->
 	upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?LISTS_SEC_INDEX);
-
-upd_elems_tbl_with_elem({Elem_tp, Elem_val}, Elems_tbl) when (Elem_tp == ungen_tuple) or (Elem_tp == tuple) ->
+upd_elems_tbl_with_new_elem({Elem_tp, Elem_val}, Elems_tbl) when (Elem_tp == ungen_tuple) or (Elem_tp == tuple) ->
 	upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?TUPLES_SEC_INDEX).
 
 
-upd_elems_tbl_with_elems([], Elems_tbl) ->
+upd_elems_tbl_with_new_elems([], Elems_tbl) ->
 	Elems_tbl;
-upd_elems_tbl_with_elems([{Elem_tp, Elem_val} | T], Elems_tbl) ->
-	Upd_elems_tbl = upd_elems_tbl_with_elem({Elem_tp, Elem_val}, Elems_tbl),
-	upd_elems_tbl_with_elems(T, Upd_elems_tbl).
+upd_elems_tbl_with_new_elems([{Elem_tp, Elem_val} | T], Elems_tbl) ->
+	Upd_elems_tbl = upd_elems_tbl_with_new_elem({Elem_tp, Elem_val}, Elems_tbl),
+	upd_elems_tbl_with_new_elems(T, Upd_elems_tbl).
 
 
 upd_tuple_sec_with_gen_tuple({tuple, Elems}, {tuples, []}) ->
 	Elems_num = length(Elems),
 	Tuple_tbl = lists:duplicate(Elems_num, ?ELEMS_TBL),
-	{tuples, update_correspond_elems_tbls_with_new_elem(Elems, [Tuple_tbl])};
+	{tuples, upd_tuple_tbl_with_new_elem(Elems, [Tuple_tbl])};
 upd_tuple_sec_with_gen_tuple({tuple, Elems}, {tuples, Tuple_tbl}) ->
-	{tuples, update_correspond_elems_tbls_with_new_elem(Elems, Tuple_tbl)}.
+	{tuples, upd_tuple_tbl_with_new_elem(Elems, Tuple_tbl)}.
 
 
 upd_tuple_sec_with_ungen_tuple({tuple, Elems}, {tuples, []}) ->
 	Elems_num = length(Elems),
-	Upd_elems_tbl = update_elems_tbl_pairwise(Elems, lists:duplicate(Elems_num, ?ELEMS_TBL)),
-	{tuples, [Upd_elems_tbl]};
+	Tuple_tbl = add_elems_to_tuple_tbl(Elems, lists:duplicate(Elems_num, ?ELEMS_TBL)),
+	{tuples, [Tuple_tbl]};
 upd_tuple_sec_with_ungen_tuple({tuple, Elems}, {tuples, Elem_tbls}) ->
-	{tuples, update_correspond_elems_tbls_with_new_elem(Elems, Elem_tbls)}.
+	{tuples, upd_tuple_tbl_with_new_elem(Elems, Elem_tbls)}.
 
-update_correspond_elems_tbls_with_new_elem(Elems, []) ->
+
+upd_tuple_tbl_with_new_elem(Elems, []) ->
 	Elems_num = length(Elems),
-	Upd_elems_tbl = update_elems_tbl_pairwise(Elems, lists:duplicate(Elems_num, ?ELEMS_TBL)),
-	[Upd_elems_tbl];
-update_correspond_elems_tbls_with_new_elem(Elems, [Elems_tbl | Elems_tbls]) ->
-	case length(Elems) == length(Elems_tbl) of
-		true  -> [update_elems_tbl_pairwise(Elems, Elems_tbl) | Elems_tbls];
-		false -> [Elems_tbl | update_correspond_elems_tbls_with_new_elem(Elems, Elems_tbls)]
+	Tuple_tbl = add_elems_to_tuple_tbl(Elems, lists:duplicate(Elems_num, ?ELEMS_TBL)),
+	[Tuple_tbl];
+upd_tuple_tbl_with_new_elem(Elems, [Tuple_tbl_item | Items]) ->
+	case length(Elems) == length(Tuple_tbl_item) of
+		true  -> [add_elems_to_tuple_tbl(Elems, Tuple_tbl_item) | Items];
+		false -> [Tuple_tbl_item | upd_tuple_tbl_with_new_elem(Elems, Items)]
 	end.
 
 
-update_elems_tbl_pairwise([], []) -> 
+add_elems_to_tuple_tbl([], []) -> 
 	[];
-update_elems_tbl_pairwise([Elem | Elems], [Elems_tbl | Elems_tbls]) when (element(1, Elems_tbl) == {any, [{any, []}]}) ->
-	[Elems_tbl | update_elems_tbl_pairwise(Elems, Elems_tbls)];
-update_elems_tbl_pairwise([{variable, _} | Elems], [Elems_tbl | Elems_tbls]) ->
-	Upd_elems_tbl = setelement(1, ?ELEMS_TBL, {any, [{any, []}]}),
-	[Upd_elems_tbl | update_elems_tbl_pairwise(Elems, Elems_tbls)];
-update_elems_tbl_pairwise([Elem | Elems], [Elems_tbl | Elems_tbls]) ->
-	Upd_elems_tbl =
+add_elems_to_tuple_tbl([Elem | Elems], [Tuple_tbl_item | Items]) when (element(1, Tuple_tbl_item) == {any, [{any, []}]}) ->
+	[Tuple_tbl_item | add_elems_to_tuple_tbl(Elems, Items)];
+add_elems_to_tuple_tbl([{variable, _Val} | Elems], [Tuple_tbl_item | Items]) ->
+	Upd_item = setelement(1, ?ELEMS_TBL, {any, [{any, []}]}),
+	[Upd_item | add_elems_to_tuple_tbl(Elems, Items)];
+add_elems_to_tuple_tbl([Elem | Elems], [Tuple_tbl_item | Items]) ->
+	Upd_item =
 		case Elem of
-			{union, U_elems} -> upd_elems_tbl_with_elems(U_elems, Elems_tbl);
-			Elem             -> upd_elems_tbl_with_elem(Elem, Elems_tbl)
+			{union, U_elems} -> upd_elems_tbl_with_new_elems(U_elems, Tuple_tbl_item);
+			Elem             -> upd_elems_tbl_with_new_elem(Elem, Tuple_tbl_item)
 		end, 
-	[Upd_elems_tbl | update_elems_tbl_pairwise(Elems, Elems_tbls)].
+	[Upd_item | add_elems_to_tuple_tbl(Elems, Items)].
 
-generate_tuples_from_elems_tbl({tuples, []}, Res) ->
+generate_tuples_from_tuple_tbl({tuples, []}, Res) ->
 	Res;
-generate_tuples_from_elems_tbl({tuples, [Tuple_elem_tbl | Tuples_elems_tbls]}, Res) ->
-	{_, Elems} = {tuple, lists:map(fun(Elems_tbl) -> 
-		convert_elems_tbl_to_internal_format(tuple_to_list(Elems_tbl), []) end, Tuple_elem_tbl)},
+generate_tuples_from_tuple_tbl({tuples, [Tuple_tbl_item | Items]}, Res) ->
+	Tuple = {tuple, lists:map(fun(Elems_tbl) -> 
+								convert_elems_tbl_to_internal_format(tuple_to_list(Elems_tbl), []) end, Tuple_tbl_item)},
 
-	generate_tuples_from_elems_tbl({tuples, Tuples_elems_tbls}, [{tuple, Elems} | Res]).
+	generate_tuples_from_tuple_tbl({tuples, Items}, [Tuple | Res]).
 
-upd_elems_tbl_by_index({Tp, Elems}, Elems_tbl, Index) when (Tp == nonempty_list) or (Tp == improper_list)
-													    or (Tp == nonempty_improper_list) or (Tp == maybe_improper_list)
-													    or (Tp == nonempty_maybe_improper_list) or (Tp == list) ->
-	Lst_sec = element(Index, Elems_tbl),							   
-	Gen_lst_sec = upd_lists_section_with_gen_lst({Tp, Elems}, Lst_sec),
 
-	setelement(Index, Elems_tbl, Gen_lst_sec);
-upd_elems_tbl_by_index({Tp, Val}, Elems_tbl, Index) when (Tp == tuple) ->
-	Tuple_sec = element(Index, Elems_tbl),
-
-	Gen_tuple_sec = upd_tuple_sec_with_gen_tuple({Tp, Val}, Tuple_sec),
-
-	setelement(Index, Elems_tbl, Gen_tuple_sec);
 upd_elems_tbl_by_index({Tp, Val}, Elems_tbl, ?ANY_SEC_INDEX) ->
 	set_elems_tbl_to_any(Elems_tbl);
+upd_elems_tbl_by_index({Tp, Val}, Elems_tbl, ?UNION_INDEX) ->
+	upd_elems_tbl_with_new_elems(Val, Elems_tbl);
 upd_elems_tbl_by_index({Tp, Val}, Elems_tbl, Index) ->
 	Sec = element(Index, Elems_tbl),
 
-	Gen_elem_values = 
+	Upd_sec = 
 	case Index of
-		?BOOLS_SEC_INDEX -> generalize_bools({Tp, Val}, Sec);
-		?NUMS_SEC_INDEX -> generalize_numbers({Tp, Val}, Sec);
-		?ATOMS_SEC_INDEX -> generalize_atoms({Tp, Val}, Sec);
-		?LISTS_SEC_INDEX -> upd_lists_section_with_ungen_lst({Tp, Val}, Sec);
-		?TUPLES_SEC_INDEX -> upd_tuple_sec_with_ungen_tuple({tuple, Val}, Sec)
+		?BOOLS_SEC_INDEX          -> upd_bools_sec({Tp, Val}, Sec);
+		?NUMS_SEC_INDEX           -> upd_numbers_sec({Tp, Val}, Sec);
+		?ATOMS_SEC_INDEX          -> upd_atoms_sec({Tp, Val}, Sec);
+		?LISTS_SEC_INDEX          -> upd_lst_sec({Tp, Val}, Sec);
+		?TUPLES_SEC_INDEX         -> upd_tuple_sec({tuple, Val}, Sec);
+		?IMPROPER_ELEMS_SEC_INDEX -> upd_improp_elems_sec({Tp, Val}, Sec)
 	end,
 
-	setelement(Index, Elems_tbl, Gen_elem_values).
+	setelement(Index, Elems_tbl, Upd_sec).
 
-generalize_list_elems_by_index({Lst_tp, [{Elem_tp, Elem_val} | T]}, Elems_tbl, Index) ->
-	Upd_elems_tbl = upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, Index),
-	generalize_list({Lst_tp, T}, Upd_elems_tbl).
 
-generalize_single_elem(Lst = {Tp, _Elems}) when (Tp == ungen_list)
-										    or (Tp == nonempty_list) or (Tp == improper_list)
-										    or (Tp == nonempty_improper_list) or (Tp == maybe_improper_list)
-										    or (Tp == nonempty_maybe_improper_list) or (Tp == list)
-										    or (Tp == undef_maybe_improper_list)
-										    or (Tp == undef_nonempty_maybe_improper_list) -> 										
-	{Gen_lst, _Elems_tbl} = generalize_list(Lst, ?ELEMS_TBL),
-	Gen_lst;
-generalize_single_elem(Tuple = {Tp, _Elems}) when (Tp == tuple) ->
-	Tuple;
-generalize_single_elem({Tp, Elems}) when (Tp == ungen_tuple) ->
-	generalize_tuple({tuple, Elems});
-generalize_single_elem(Elem) ->
-	Elem.
+upd_tuple_sec({Tp, Val}, Sec) ->
+	case Tp of
+		tuple       -> upd_tuple_sec_with_gen_tuple({Tp, Val}, Sec);
+		ungen_tuple -> upd_tuple_sec_with_gen_tuple({Tp, Val}, Sec)
+	end.
+
+
+upd_lst_sec({Tp, Val}, Sec) when (Tp == nonempty_list) or (Tp == improper_list)
+						      or (Tp == nonempty_improper_list) or (Tp == maybe_improper_list)
+						      or (Tp == nonempty_maybe_improper_list) or (Tp == list) ->
+	upd_lst_sec_with_gen_lst({Tp, Val}, Sec);
+upd_lst_sec({Tp, Val}, Sec) ->
+	upd_lst_sec_with_ungen_lst({Tp, Val}, Sec).
+
 
 generalize_tuple({Tp, Val}) ->
 	Upd_tuple_sec =
@@ -451,23 +441,22 @@ generalize_tuple({Tp, Val}) ->
 			ungen_tuple -> upd_tuple_sec_with_ungen_tuple({tuple, Val}, {tuples, []})
 		end,  
 		 
-	[Gen_tuple] = generate_tuples_from_elems_tbl(Upd_tuple_sec, []),
+	[Gen_tuple] = generate_tuples_from_tuple_tbl(Upd_tuple_sec, []),
 	Gen_tuple.
+
 	
 %empty_list
 generalize_list(Empty_lst = {empty_list, []}, Elems_tbl) ->
 	{Empty_lst, Elems_tbl};
 generalize_list({Lst_tp, {empty_list, []}}, Elems_tbl) ->
 	generalize_list({Lst_tp, []}, Elems_tbl);
-
 %nonempty_maybe_improper_list
 generalize_list({ungen_list, [{'...', _Var_name} | T]}, Elems_tbl) ->
 	Upd_elems_tbl = setelement(?LISTS_SEC_INDEX, ?ELEMS_TBL, {nonempty_maybe_improper_list, []}),
 	{{undef_nonempty_maybe_improper_list, []}, Upd_elems_tbl};
-
 generalize_list({Lst_tp, {ungen_list, Elems}}, Elems_tbl) ->
 	Lst_sec = {lists, [{undef_list, Elems_tbl}]},
-	{lists, [{Upd_lst_tp, Upd_elems_tbl}]} = upd_lists_section_with_ungen_lst({ungen_list, Elems}, Lst_sec),
+	{lists, [{Upd_lst_tp, Upd_elems_tbl}]} = upd_lst_sec_with_ungen_lst({ungen_list, Elems}, Lst_sec),
 
 	Elems_tbl_secs = tuple_to_list(Upd_elems_tbl),
 	Gen_lst = build_list(Upd_lst_tp, Elems_tbl_secs, []),
@@ -478,23 +467,19 @@ generalize_list({Lst_tp, {Tp, Elems}}, Elems_tbl) when (Tp == nonempty_list) or 
 												    or (Tp == undef_maybe_improper_list)
 												    or (Tp == undef_nonempty_maybe_improper_list) ->
     Lst_sec = {lists, [{undef_list, Elems_tbl}]},
-	{lists, [{Upd_lst_tp, Upd_elems_tbl}]} = upd_lists_section_with_gen_lst({Tp, Elems}, Lst_sec),
+	{lists, [{Upd_lst_tp, Upd_elems_tbl}]} = upd_lst_sec_with_gen_lst({Tp, Elems}, Lst_sec),
 
 	Elems_tbl_secs = tuple_to_list(Upd_elems_tbl),
 	Gen_lst = build_list(Upd_lst_tp, Elems_tbl_secs, []),
 	{Gen_lst, Upd_elems_tbl};
 %improper list
-generalize_list({Lst_tp, {Tp, Elems}}, Elems_tbl) ->
-	Improp_elem = generalize_single_elem({Tp, Elems}),
+generalize_list(Lst = {Lst_tp, {Tp, Elems}}, Elems_tbl) ->
+	Upd_elems_tbl = upd_elems_tbl_by_index({Tp, Elems}, Elems_tbl, ?IMPROPER_ELEMS_SEC_INDEX),
 
-	Elems_tbl_secs = tuple_to_list(Elems_tbl),
-	{Gen_lst_tp, Gen_Elems} = build_list(nonempty_improper_list, Elems_tbl_secs, []),
+	Elems_tbl_secs = tuple_to_list(Upd_elems_tbl),
+	Gen_lst = build_list(nonempty_improper_list, Elems_tbl_secs, []),
 
-	{improper_elems, Improp_elems} = element(?IMPROPER_ELEMS_SEC_INDEX, Elems_tbl),
-	{improper_elems, Upd_improp_elems} = generalize_improper_part(Improp_elem, {improper_elems, Improp_elems}),	
-
-	{{Gen_lst_tp, Gen_Elems ++ Upd_improp_elems}, setelement(?IMPROPER_ELEMS_SEC_INDEX, Elems_tbl, {improper_elems, Upd_improp_elems})};
-
+	{Gen_lst, Upd_elems_tbl};
 generalize_list({Lst_tp, []}, Elems_tbl) ->
 	Elems_tbl_secs = tuple_to_list(Elems_tbl),
 
@@ -509,178 +494,192 @@ generalize_list({Lst_tp, []}, Elems_tbl) ->
 	case Improp_elems of
 		[{empty_list, []}] -> {Gen_list, Elems_tbl};
 		[]                -> {Gen_list, setelement(?IMPROPER_ELEMS_SEC_INDEX, Elems_tbl, {improper_elems, [{empty_list, []}]})};
-		Multiple_elems    -> {improper_elems, Upd_improp_elems} = generalize_improper_part({empty_list, []}, {improper_elems, Improp_elems}),
+		Multiple_elems    -> {improper_elems, Upd_improp_elems} = upd_improp_elems_sec({empty_list, []}, {improper_elems, Improp_elems}),
 		                     {Gen_list, setelement(?IMPROPER_ELEMS_SEC_INDEX, Elems_tbl, {improper_elems, Upd_improp_elems})}
 	end;
-
 generalize_list({Lst_tp, [_ | T]}, Elems_tbl) when element(?ANY_SEC_INDEX, Elems_tbl) == {any, [{any, []}]} ->
 	generalize_list({Lst_tp, T}, Elems_tbl);
-
 generalize_list({Lst_tp, [{variable, _Val} | T]}, Elems_tbl) ->
 	Upd_possible_types = set_elems_tbl_to_any(Elems_tbl),
 	generalize_list({Lst_tp, T}, Upd_possible_types);
-
-generalize_list(List = {Lst_tp, [{Elem_tp, _Elem_val} | T]}, Elems_tbl) when Elem_tp == any ->
-	generalize_list_elems_by_index(List, Elems_tbl, ?ANY_SEC_INDEX);
-
-generalize_list(List = {Lst_tp, [{Elem_tp, _Elem_val} | T]}, Elems_tbl) when Elem_tp == boolean ->
-	generalize_list_elems_by_index(List, Elems_tbl, ?BOOLS_SEC_INDEX);
-	
-generalize_list(List = {Lst_tp, [{Elem_tp, _Elem_val} | T]}, Elems_tbl) when ((Elem_tp == neg_integer) 
+generalize_list({Lst_tp, [{Elem_tp, Elem_val} | T]}, Elems_tbl) when Elem_tp == any ->
+	Upd_elems_tbl = upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?ANY_SEC_INDEX),
+	generalize_list({Lst_tp, T}, Upd_elems_tbl);
+generalize_list({Lst_tp, [{Elem_tp, Elem_val} | T]}, Elems_tbl) when Elem_tp == boolean ->
+	Upd_elems_tbl = upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?BOOLS_SEC_INDEX),
+	generalize_list({Lst_tp, T}, Upd_elems_tbl);
+generalize_list({Lst_tp, [{Elem_tp, Elem_val} | T]}, Elems_tbl) when ((Elem_tp == neg_integer) 
 	                                                                      or (Elem_tp == pos_integer) 
 	                                                                      or (Elem_tp == non_neg_integer) 
 	                                                                      or (Elem_tp == integer) 
 	                                                                      or (Elem_tp == float) 
 	                                                                      or (Elem_tp == number)) ->
-	generalize_list_elems_by_index(List, Elems_tbl, ?NUMS_SEC_INDEX);
+	Upd_elems_tbl = upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?NUMS_SEC_INDEX),
+	generalize_list({Lst_tp, T}, Upd_elems_tbl);
+generalize_list({Lst_tp, [{Elem_tp, Elem_val} | T]}, Elems_tbl) when Elem_tp == atom ->
+	Upd_elems_tbl = upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?ATOMS_SEC_INDEX),
+	generalize_list({Lst_tp, T}, Upd_elems_tbl);
+generalize_list({Lst_tp, [{Elem_tp, Elem_val} | T]}, Elems_tbl) when (Elem_tp == empty_list) or (Elem_tp == ungen_list)
+															      or (Elem_tp == nonempty_list) or (Elem_tp == improper_list)
+															      or (Elem_tp == nonempty_improper_list) or (Elem_tp == maybe_improper_list)
+																  or (Elem_tp == nonempty_maybe_improper_list) or (Elem_tp == list)
+																  or (Elem_tp == undef_maybe_improper_list)
+																  or (Elem_tp == undef_nonempty_maybe_improper_list) ->
+	Upd_elems_tbl = upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?LISTS_SEC_INDEX),
+	generalize_list({Lst_tp, T}, Upd_elems_tbl);
+generalize_list({Lst_tp, [{Elem_tp, Elem_val} | T]}, Elems_tbl) when (Elem_tp == ungen_tuple) or (Elem_tp == tuple) -> 
+	Upd_elems_tbl = upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?TUPLES_SEC_INDEX),
+	generalize_list({Lst_tp, T}, Upd_elems_tbl);
+generalize_list({Lst_tp, [{union, Elem_val} | T]}, Elems_tbl) -> 
+	Upd_elems_tbl = upd_elems_tbl_by_index({union, Elem_val}, Elems_tbl, ?UNION_INDEX),
+	generalize_list({Lst_tp, T}, Upd_elems_tbl).
 
-generalize_list(List = {Lst_tp, [{Elem_tp, El_val} | T]}, Elems_tbl) when Elem_tp == atom ->
-	generalize_list_elems_by_index(List, Elems_tbl, ?ATOMS_SEC_INDEX);
 
-generalize_list(List = {Lst_tp, [{Elem_tp, El_val} | T]}, Elems_tbl) when (Elem_tp == empty_list) or (Elem_tp == ungen_list)
-																	   or (Elem_tp == nonempty_list) or (Elem_tp == improper_list)
-																	   or (Elem_tp == nonempty_improper_list) or (Elem_tp == maybe_improper_list)
-																	   or (Elem_tp == nonempty_maybe_improper_list) or (Elem_tp == list)
-																	   or (Elem_tp == undef_maybe_improper_list)
-																	   or (Elem_tp == undef_nonempty_maybe_improper_list) ->
-	generalize_list_elems_by_index(List, Elems_tbl, ?LISTS_SEC_INDEX);
-generalize_list(List = {Lst_tp, [{Elem_tp, El_val} | T]}, Elems_tbl) when (Elem_tp == ungen_tuple) or (Elem_tp == tuple) -> 
-	generalize_list_elems_by_index(List, Elems_tbl, ?TUPLES_SEC_INDEX).
-
-generalize_improp_elems([], Improp_sec) ->
+upd_improp_elems_sec_with_elems([], Improp_sec) ->
 	Improp_sec;
-generalize_improp_elems([Elem | Elems], Improp_sec) ->
-	Upd_improp_sec = generalize_improper_part(Elem, Improp_sec),
-	generalize_improp_elems(Elems, Upd_improp_sec).
+upd_improp_elems_sec_with_elems([Elem | Elems], Improp_sec) ->
+	Upd_improp_sec = upd_improp_elems_sec(Elem, Improp_sec),
+	upd_improp_elems_sec_with_elems(Elems, Upd_improp_sec).
 
-generalize_improper_part(Improp_elem, {improper_elems, []}) ->
-	{improper_elems, [Improp_elem]};
-generalize_improper_part(Improp_elem, {improper_elems, Elems}) ->
-	case lists:member(Improp_elem, Elems) of
+
+upd_improp_elems_sec(Improp_elem, {improper_elems, Elems}) ->
+	Elems_tbl = upd_elems_tbl_with_new_elem(Improp_elem, ?ELEMS_TBL),
+	Elems_tbl_secs = tuple_to_list(Elems_tbl), 
+	Gen_elem = convert_elems_tbl_to_internal_format(Elems_tbl_secs, []),
+
+	case lists:member(Gen_elem, Elems) of
 		true  -> {improper_elems, Elems};
-		false -> {improper_elems, [Improp_elem | Elems]}
+		false -> {improper_elems, [Gen_elem | Elems]}
 	end.
 
-generalize_bools(Boolean, {bools, []}) ->
+
+upd_bools_sec(Boolean, {bools, []}) ->
 	{bools, [Boolean]};
-generalize_bools({boolean, Value}, {bools, [{boolean, []}]}) ->
+upd_bools_sec({boolean, Val}, {bools, [{boolean, []}]}) ->
 	{bools, [{boolean, []}]};
-generalize_bools({boolean, [Value]}, {bools, [{boolean, [Value]}]}) ->
-	{bools, [{boolean, [Value]}]};
-generalize_bools({boolean, [false]}, {bools, [{boolean, [true]}]}) ->
+upd_bools_sec({boolean, [Val]}, {bools, [{boolean, [Val]}]}) ->
+	{bools, [{boolean, [Val]}]};
+upd_bools_sec({boolean, [false]}, {bools, [{boolean, [true]}]}) ->
 	{bools, [{boolean, []}]};
-generalize_bools({boolean, [true]}, {bools, [{boolean, [false]}]}) ->
+upd_bools_sec({boolean, [true]}, {bools, [{boolean, [false]}]}) ->
 	{bools, [{boolean, []}]}.
 
-generalize_atoms(Atom, {atoms, []}) ->
+
+upd_atoms_sec(Atom, {atoms, []}) ->
 	{atoms, [Atom]};
-generalize_atoms({atom, []}, _) ->
+upd_atoms_sec({atom, []}, _) ->
 	{atoms, [{atom, []}]};
-generalize_atoms(_, {atoms, [{atom, []}]}) ->
+upd_atoms_sec(_, {atoms, [{atom, []}]}) ->
 	{atoms, [{atom, []}]};
-generalize_atoms({Type, Value}, {atoms, Values}) ->
-	case lists:member({Type, Value}, Values) of
-		true -> {atoms, Values};
-		false -> {atoms, [{Type, Value} | Values]}
+upd_atoms_sec({Tp, Val}, {atoms, Vals}) ->
+	case lists:member({Tp, Val}, Vals) of
+		true -> {atoms, Vals};
+		false -> {atoms, [{Tp, Val} | Vals]}
 	end.
 
-generalize_numbers({Type, Value}, {nums, []}) ->
-	{Type, [{Type, Value}]};
-generalize_numbers({number, []}, _) ->
+
+upd_numbers_sec({Tp, Val}, {nums, []}) ->
+	{Tp, [{Tp, Val}]};
+upd_numbers_sec({number, []}, _) ->
 	{number, [{number, []}]};
-generalize_numbers(_Number, Nums = {number, [{number, []}]}) ->
+upd_numbers_sec(_Number, Nums = {number, [{number, []}]}) ->
 	Nums;
-
-generalize_numbers({Type, Value}, {Type, [{Type, []}]}) ->
-	{Type, [{Type, []}]};	
-generalize_numbers({Type, []}, {Type, _}) ->
-	{Type, [{Type, []}]};	
-generalize_numbers({Type, Value}, {integer, [{integer, []}]}) when ((Type == neg_integer) or (Type == pos_integer) or (Type == non_neg_integer)) -> 
+upd_numbers_sec({Tp, Val}, {Tp, [{Tp, []}]}) ->
+	{Tp, [{Tp, []}]};	
+upd_numbers_sec({Tp, []}, {Tp, _}) ->
+	{Tp, [{Tp, []}]};	
+upd_numbers_sec({Tp, Val}, {integer, [{integer, []}]}) when (Tp == neg_integer) or (Tp == pos_integer) 
+                                                         or (Tp == non_neg_integer) -> 
 	{integer, [{integer, []}]};
-generalize_numbers({integer, Value}, {Gen_type, [{Gen_type, []}]}) when ((Gen_type == neg_integer) or (Gen_type == pos_integer) or (Gen_type == non_neg_integer)) ->
+upd_numbers_sec({integer, Val}, {Gen_tp, [{Gen_tp, []}]}) when (Gen_tp == neg_integer) or (Gen_tp == pos_integer) 
+	                                                        or (Gen_tp == non_neg_integer) ->
 	{integer, [{integer, []}]};
-generalize_numbers({non_neg_integer, Value}, {pos_integer, [{pos_integer, []}]}) ->
+upd_numbers_sec({non_neg_integer, Val}, {pos_integer, [{pos_integer, []}]}) ->
 	{non_neg_integer, [{non_neg_integer, []}]};
-generalize_numbers({Type, Value}, {neg_integer, [{neg_integer, []}]}) when (Type == pos_integer) or (Type == non_neg_integer) ->
+upd_numbers_sec({Tp, Val}, {neg_integer, [{neg_integer, []}]}) when (Tp == pos_integer) or (Tp == non_neg_integer) ->
 	{integer, [{integer, []}]};
-generalize_numbers({pos_integer, Value}, {non_neg_integer, [{non_neg_integer, []}]}) ->
+upd_numbers_sec({pos_integer, Val}, {non_neg_integer, [{non_neg_integer, []}]}) ->
 	{non_neg_integer, [{non_neg_integer, []}]};
-generalize_numbers({neg_integer, Value}, {Gen_type, [{Gen_type, []}]}) when (Gen_type == pos_integer) or (Gen_type == non_neg_integer) ->
+upd_numbers_sec({neg_integer, Val}, {Gen_tp, [{Gen_tp, []}]}) when (Gen_tp == pos_integer) or (Gen_tp == non_neg_integer) ->
 	{integer, [{integer, []}]};		
-generalize_numbers({float, Value}, {Gen_type, Values}) when ((Gen_type == neg_integer) or (Gen_type == pos_integer) or (Gen_type == non_neg_integer) or (Gen_type == integer)) ->
+upd_numbers_sec({float, Val}, {Gen_tp, Vals}) when (Gen_tp == neg_integer) or (Gen_tp == pos_integer) 
+	                                            or (Gen_tp == non_neg_integer) or (Gen_tp == integer) ->
 	{number, [{number, []}]};
-generalize_numbers({Type, Value}, {float, Values}) when ((Type == neg_integer) or (Type == pos_integer) or (Type == non_neg_integer) or (Type == integer)) ->
+upd_numbers_sec({Tp, Val}, {float, Vals}) when (Tp == neg_integer) or (Tp == pos_integer) 
+	                                        or (Tp == non_neg_integer) or (Tp == integer) ->
 	{number, [{number, []}]};
-generalize_numbers({Type, []}, {integer, Values}) when ((Type == neg_integer) or (Type == pos_integer) or (Type == non_neg_integer)) ->
+upd_numbers_sec({Tp, []}, {integer, Vals}) when (Tp == neg_integer) or (Tp == pos_integer) 
+	                                         or (Tp == non_neg_integer) ->
 	{integer, [{integer, []}]};
-generalize_numbers({non_neg_integer, []}, {pos_integer, Values}) ->
+upd_numbers_sec({non_neg_integer, []}, {pos_integer, Vals}) ->
 	{non_neg_integer, [{non_neg_integer, []}]};
-generalize_numbers({Type, []}, {neg_integer, Values}) when (Type == pos_integer) or (Type == non_neg_integer) ->
+upd_numbers_sec({Tp, []}, {neg_integer, Vals}) when (Tp == pos_integer) or (Tp == non_neg_integer) ->
 	{integer, [{integer, []}]};
-generalize_numbers({pos_integer, []}, {non_neg_integer, Values}) ->
+upd_numbers_sec({pos_integer, []}, {non_neg_integer, Vals}) ->
 	{non_neg_integer, [{non_neg_integer, []}]};
-generalize_numbers({neg_integer, []}, {Gen_type, Values}) when (Gen_type == pos_integer) or (Gen_type == non_neg_integer) ->
+upd_numbers_sec({neg_integer, []}, {Gen_tp, Vals}) when (Gen_tp == pos_integer) or (Gen_tp == non_neg_integer) ->
 	{integer, [{integer, []}]};
-generalize_numbers({Num_type, [Value]}, {Gen_type, Values}) -> 
+upd_numbers_sec({Num_Tp, [Val]}, {Gen_tp, Vals}) -> 
 
-	case lists:member({Num_type, [Value]}, Values) of
-		true -> {Num_type, Values};
-		false -> {Num_type, [{Num_type, [Value]} | Values]}
+	case lists:member({Num_Tp, [Val]}, Vals) of
+		true  -> {Num_Tp, Vals};
+		false -> {Num_Tp, [{Num_Tp, [Val]} | Vals]}
 	end.
+
 
 set_elems_tbl_to_any(Elems_tbl) ->
 	Improp_sec = element(?IMPROPER_ELEMS_SEC_INDEX, Elems_tbl),
 	Upd_elems_tbl = setelement(?ANY_SEC_INDEX, ?ELEMS_TBL, {any, [{any, []}]}),
 	setelement(?IMPROPER_ELEMS_SEC_INDEX, Upd_elems_tbl, Improp_sec).
 
-upd_lists_section_with_gen_lst({Lst_tp, []}, Lst_sec) when (Lst_tp == undef_maybe_improper_list) 
-                                                        or (Lst_tp == undef_nonempty_maybe_improper_list) ->
-    upd_lists_section_with_ungen_lst({Lst_tp, []}, Lst_sec);
-%check
-upd_lists_section_with_gen_lst({Lst_tp, [{union, U_elems}]}, Lst_sec) ->
-	upd_lists_section_with_ungen_lst({Lst_tp, U_elems}, Lst_sec);
-%check
-upd_lists_section_with_gen_lst({Lst_tp, [{union, U_elems}, {union, Improp_elems}]}, Lst_sec) ->
-	case Lst_sec of
-		{lists, []}                            -> Upd_improp_sec = generalize_improp_elems(Improp_elems, {improper_elems, []}),
-		                           				  Upd_elems_tbl = setelement(?IMPROPER_ELEMS_SEC_INDEX, ?ELEMS_TBL, Upd_improp_sec), 
-								       			  upd_lists_section_with_ungen_lst({Lst_tp, U_elems ++ hd(Improp_elems)}, {lists, [{Lst_tp, Upd_elems_tbl}]});
-	   	{lists, [{Gen_lst_tp, Lst_elems_tbl}]} -> Improp_sec = element(?IMPROPER_ELEMS_SEC_INDEX, Lst_elems_tbl),
-		   										  Upd_improp_sec = generalize_improp_elems(Improp_elems, Improp_sec),
-		   										  Upd_elems_tbl = setelement(?IMPROPER_ELEMS_SEC_INDEX, Lst_elems_tbl, Upd_improp_sec),
-		   										  upd_lists_section_with_ungen_lst({Lst_tp, U_elems ++ hd(Improp_elems)}, {lists, [{Gen_lst_tp, Upd_elems_tbl}]})
-	end;
-%check
-upd_lists_section_with_gen_lst({Lst_tp, [{Tp, Val}, {union, Improp_elems}]}, Lst_sec) ->
-	case Lst_sec of
-		{lists, []}                            -> Upd_improp_sec = generalize_improp_elems(Improp_elems, {improper_elems, []}),
-		                           				  Upd_elems_tbl = setelement(?IMPROPER_ELEMS_SEC_INDEX, ?ELEMS_TBL, Upd_improp_sec), 
-								       			  upd_lists_section_with_ungen_lst({Lst_tp, [{Tp, Val}] ++ hd(Improp_elems)}, {lists, [{Lst_tp, Upd_elems_tbl}]});
-	   	{lists, [{Gen_lst_tp, Lst_elems_tbl}]} -> Improp_sec = element(?IMPROPER_ELEMS_SEC_INDEX, Lst_elems_tbl),
-		   										  Upd_improp_sec = generalize_improp_elems(Improp_elems, Improp_sec),
-		   										  Upd_elems_tbl = setelement(?IMPROPER_ELEMS_SEC_INDEX, Lst_elems_tbl, Upd_improp_sec),
-		   										  upd_lists_section_with_ungen_lst({Lst_tp, [{Tp, Val}] ++ hd(Improp_elems)}, {lists, [{Gen_lst_tp, Upd_elems_tbl}]})
-	end;
-%Check
-upd_lists_section_with_gen_lst({Lst_tp, [{union, U_elems}, Improp_elem]}, Lst_sec) ->
-   	upd_lists_section_with_ungen_lst({Lst_tp, U_elems ++ Improp_elem}, Lst_sec);
-%Check
-upd_lists_section_with_gen_lst(List = {Lst_tp, [{Tp, Val}, Improp_elem]}, Lst_sec) ->
-	upd_lists_section_with_ungen_lst({Lst_tp, [{Tp, Val} | Improp_elem]}, Lst_sec);
-%Check
-upd_lists_section_with_gen_lst(List = {Lst_tp, [{Tp, Val}]}, Lst_sec) ->
-	upd_lists_section_with_ungen_lst(List, Lst_sec).
 
-upd_lists_section_with_ungen_lst(List, {lists, []}) ->
+upd_lst_sec_with_gen_lst({Lst_tp, []}, Lst_sec) when (Lst_tp == undef_maybe_improper_list) 
+                                                  or (Lst_tp == undef_nonempty_maybe_improper_list) ->
+    upd_lst_sec_with_ungen_lst({Lst_tp, []}, Lst_sec);
+upd_lst_sec_with_gen_lst({Lst_tp, [{union, U_elems}]}, Lst_sec) ->
+	upd_lst_sec_with_ungen_lst({Lst_tp, U_elems}, Lst_sec);
+upd_lst_sec_with_gen_lst({Lst_tp, [{union, U_elems}, {union, Improp_elems}]}, Lst_sec) ->
+	case Lst_sec of
+		{lists, []}                            -> Upd_improp_sec = upd_improp_elems_sec_with_elems(Improp_elems, {improper_elems, []}),
+		                           				  Upd_elems_tbl = setelement(?IMPROPER_ELEMS_SEC_INDEX, ?ELEMS_TBL, Upd_improp_sec), 
+								       			  upd_lst_sec_with_ungen_lst({Lst_tp, U_elems ++ hd(Improp_elems)}, {lists, [{Lst_tp, Upd_elems_tbl}]});
+	   	{lists, [{Gen_lst_tp, Lst_elems_tbl}]} -> Improp_sec = element(?IMPROPER_ELEMS_SEC_INDEX, Lst_elems_tbl),
+		   										  Upd_improp_sec = upd_improp_elems_sec_with_elems(Improp_elems, Improp_sec),
+		   										  Upd_elems_tbl = setelement(?IMPROPER_ELEMS_SEC_INDEX, Lst_elems_tbl, Upd_improp_sec),
+		   										  upd_lst_sec_with_ungen_lst({Lst_tp, U_elems ++ hd(Improp_elems)}, {lists, [{Gen_lst_tp, Upd_elems_tbl}]})
+	end;
+%check
+upd_lst_sec_with_gen_lst({Lst_tp, [{Tp, Val}, {union, Improp_elems}]}, Lst_sec) ->
+	case Lst_sec of
+		{lists, []}                            -> Upd_improp_sec = upd_improp_elems_sec_with_elems(Improp_elems, {improper_elems, []}),
+		                           				  Upd_elems_tbl = setelement(?IMPROPER_ELEMS_SEC_INDEX, ?ELEMS_TBL, Upd_improp_sec), 
+								       			  upd_lst_sec_with_ungen_lst({Lst_tp, [{Tp, Val}] ++ hd(Improp_elems)}, {lists, [{Lst_tp, Upd_elems_tbl}]});
+	   	{lists, [{Gen_lst_tp, Lst_elems_tbl}]} -> Improp_sec = element(?IMPROPER_ELEMS_SEC_INDEX, Lst_elems_tbl),
+		   										  Upd_improp_sec = upd_improp_elems_sec_with_elems(Improp_elems, Improp_sec),
+		   										  Upd_elems_tbl = setelement(?IMPROPER_ELEMS_SEC_INDEX, Lst_elems_tbl, Upd_improp_sec),
+		   										  upd_lst_sec_with_ungen_lst({Lst_tp, [{Tp, Val}] ++ hd(Improp_elems)}, {lists, [{Gen_lst_tp, Upd_elems_tbl}]})
+	end;
+%Check
+upd_lst_sec_with_gen_lst({Lst_tp, [{union, U_elems}, Improp_elem]}, Lst_sec) ->
+   	upd_lst_sec_with_ungen_lst({Lst_tp, U_elems ++ Improp_elem}, Lst_sec);
+%Check
+upd_lst_sec_with_gen_lst(List = {Lst_tp, [{Tp, Val}, Improp_elem]}, Lst_sec) ->
+	upd_lst_sec_with_ungen_lst({Lst_tp, [{Tp, Val} | Improp_elem]}, Lst_sec);
+%Check
+upd_lst_sec_with_gen_lst(List = {Lst_tp, [{Tp, Val}]}, Lst_sec) ->
+	upd_lst_sec_with_ungen_lst(List, Lst_sec).
+
+
+upd_lst_sec_with_ungen_lst(List, {lists, []}) ->
 	{{Lst_tp, Elems}, Elems_tbl} = generalize_list(List, ?ELEMS_TBL),
 	{lists, [{Lst_tp, Elems_tbl}]};
-upd_lists_section_with_ungen_lst({Lst_tp, Elems}, {lists, [{Gen_lst_tp, Elems_tbl}]}) when (Gen_lst_tp == undef_maybe_improper_list) 
+upd_lst_sec_with_ungen_lst({Lst_tp, Elems}, {lists, [{Gen_lst_tp, Elems_tbl}]}) when (Gen_lst_tp == undef_maybe_improper_list) 
 																	                    or (Gen_lst_tp == undef_nonempty_maybe_improper_list)
 																	                    or (Lst_tp == undef_maybe_improper_list)
 																	                    or (Lst_tp == undef_nonempty_maybe_improper_list) ->
 	Upd_gen_lst_tp = generalize_lists_type(Lst_tp, Gen_lst_tp),
 	{lists, [{Upd_gen_lst_tp, ?ELEMS_TBL}]};
-upd_lists_section_with_ungen_lst({Lst_tp, Elems}, {lists, [{Gen_lst_tp, Elems_tbl}]}) ->
+upd_lst_sec_with_ungen_lst({Lst_tp, Elems}, {lists, [{Gen_lst_tp, Elems_tbl}]}) ->
 	{{Upd_lst_tp, _}, Upd_elems_tbl} = generalize_list({Lst_tp, Elems}, Elems_tbl),
 	Upd_gen_lst_tp = generalize_lists_type(Upd_lst_tp, Gen_lst_tp),
 	{lists, [{Upd_gen_lst_tp, Upd_elems_tbl}]}.
@@ -702,7 +701,7 @@ build_list(Lst_tp, [{improper_elems, Elems_type}], Res) ->
 build_list(Lst_tp, [{_Label, []} | T], Res) ->
 	build_list(Lst_tp, T, Res);
 build_list(Lst_tp, [{tuples, Tuple_tbl} | T], Res) ->
-	Tuples = generate_tuples_from_elems_tbl({tuples, Tuple_tbl}, []),
+	Tuples = generate_tuples_from_tuple_tbl({tuples, Tuple_tbl}, []),
 	build_list(Lst_tp, T, [Tuples | Res]);
 build_list(Lst_tp, [{lists, [{Pos_list_type, []}]} | T], Res) ->
 	build_list(Lst_tp, T, [[{Pos_list_type, []}] | Res]);
@@ -1070,7 +1069,7 @@ convert_value_in_basic_format_to_compound({Tp, Val}) when (Tp == empty_list) or 
 														   or (Tp == nonempty_maybe_improper_list) or (Tp == list)
 														   or (Tp == undef_maybe_improper_list)
 														   or (Tp == undef_nonempty_maybe_improper_list)
-														   or (Tp == tuple) -> 
+														   or (Tp == tuple) or (Tp == union) -> 
 	{Tp, Val};
 convert_value_in_basic_format_to_compound({'...', Val}) -> 
 	{'...', Val};
@@ -1809,7 +1808,40 @@ test() ->
 									                              {atom,[he]}]},
 									                         {union,[{atom,[to]},{empty_list,[]}]}]}]},
 									               {union,[{empty_list,[]},{atom,[do]}]}]}]},
-									     {integer,[7]}]}}).
+									     {integer,[7]}]}}),
+
+	Gen_tuple = {union,[{tuple,[{union,[{integer,[1]},{integer,[3]}]},
+                {union,[{integer,[2]},{integer,[4]}]}]},
+        {tuple,[{integer,[5]},{integer,[6]},{integer,[7]}]}]},
+
+    A62 = c([1,2,Gen_tuple]),
+    Test62 = g(A62),
+	erlang:display({test62, Test62 == {nonempty_list,[{union,[{integer,[1]},
+				                        {integer,[2]},
+				                        {tuple,[{union,[{integer,[1]},{integer,[3]}]},
+				                                {union,[{integer,[2]},{integer,[4]}]}]},
+				                        {tuple,[{integer,[5]},
+				                                {integer,[6]},
+				                                {integer,[7]}]}]}]}}),
+
+	A63 = c([1,2 | Gen_tuple]),
+    Test63 = g(A63),
+	erlang:display({test63, Test63 == {nonempty_improper_list,
+									    [{union,[{integer,[1]},{integer,[2]}]},
+									     {union,
+									         [{tuple,
+									              [{union,[{integer,[1]},{integer,[3]}]},
+									               {union,[{integer,[2]},{integer,[4]}]}]},
+									          {tuple,[{integer,[5]},{integer,[6]},{integer,[7]}]}]}]}}),
+
+	A64 = c([{ok, error}, Gen_tuple]),
+    Test64 = g(A64),
+	erlang:display({test64, Test64 == {nonempty_list,
+									    [{union,
+									         [{tuple,
+									              [{union,[{integer,[1]},{integer,[3]},{atom,[ok]}]},
+									               {union,[{integer,[2]},{integer,[4]},{atom,[error]}]}]},
+									          {tuple,[{integer,[5]},{integer,[6]},{integer,[7]}]}]}]}}).
 
 %	A62 = c([1,2 | {3,4}]),
 %	Test62 = g(B62),
@@ -1821,6 +1853,15 @@ g(List) ->
 
 c(Value) ->
 	convert_value_in_basic_format_to_compound(Value).
+
+u(Elems) ->
+	{_, A} = c(Elems),
+	{Res, _} = generalize_elems(A, []),
+	Res.
+
+t(Tuple) ->
+	A = c(Tuple),
+	generalize_tuple(A).
 
 
 
