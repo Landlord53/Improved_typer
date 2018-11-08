@@ -257,7 +257,8 @@ infer_match_expr_inf(Expr, Vars) ->
 	[Leftside_expr, Rightside_expr] = get_children(Expr),
 
 	case ?Expr:type(Leftside_expr) of
-		variable -> bound_a_single_var(Leftside_expr, Rightside_expr, Vars)
+		variable -> bound_a_single_var(Leftside_expr, Rightside_expr, Vars);
+		cons     -> bound_cons(Leftside_expr, Rightside_expr, Vars)
 	end.
 
 	%{?Expr:value(Leftside_expr), infer_expr_inf(Rightside_expr, Variables)}.
@@ -274,6 +275,19 @@ bound_a_single_var(Leftside_expr, Rightside_expr, Vars) ->
 				 {New_var, [New_var | Upd_vars]}
 	end.
 
+bound_cons(Leftside_expr, Rightside_expr, Vars) ->
+	{Leftside_cons, Upd_vars} = infer_expr_inf(Leftside_expr, Vars),
+	{Rightside_cons_expr, Upd_vars2} = infer_expr_inf(Rightside_expr, Upd_vars),
+	Gen_rightside_cons = generalize_term(Rightside_cons_expr, []).
+
+%bound_cons_vars({ungen_list, [{variable, [Var_name]} | T]}, Gen_rightside_cons, Vars) ->
+%	case is_bounded(Var_name, Vars) of
+%		true  -> bound_cons_vars({ungen_list, T}, Gen_rightside_cons, Vars);
+%		false -> {Type, Elems} = Gen_rightside_cons,
+%		         bound_cons_vars({ungen_list, T}, Gen_rightside_cons, )
+
+
+
 generalize_elems(Elems, []) ->
 	generalize_elems(Elems, ?ELEMS_TBL);
 generalize_elems([], Elems_tbl) ->
@@ -283,6 +297,30 @@ generalize_elems([], Elems_tbl) ->
 generalize_elems([Elem | Elems], Elems_tbl) ->
 	Upd_elems_tbl = upd_elems_tbl_with_new_elem(Elem, Elems_tbl),
 	generalize_elems(Elems, Upd_elems_tbl).
+
+generalize_term(Term, []) ->
+generalize_term(Term, ?ELEMS_TBL);
+generalize_term({union, Elem_val}, Elems_tbl) ->
+	Upd_elems_tbl = upd_elems_tbl_with_new_elems(Elem_val, Elems_tbl),
+	convert_elems_tbl_to_internal_format(Upd_elems_tbl, []);
+generalize_term({boolean, Elem_val}, _Elems_tbl) ->
+	{boolean, Elem_val};
+generalize_term({Elem_tp, Elem_val}, _Elems_tbl) when (Elem_tp == neg_integer) or (Elem_tp == pos_integer) 
+	                                                          or (Elem_tp == non_neg_integer) or (Elem_tp == integer) 
+	                                                          or (Elem_tp == float) or (Elem_tp == number) ->
+	{Elem_tp, Elem_val};
+generalize_term({Elem_tp, Elem_val}, _Elems_tbl) when (Elem_tp == atom) ->
+	{Elem_tp, Elem_val};
+generalize_term({Elem_tp, Elem_val}, Elems_tbl) when (Elem_tp == empty_list) or (Elem_tp == ungen_list)
+												              or (Elem_tp == nonempty_list) or (Elem_tp == improper_list)
+												              or (Elem_tp == nonempty_improper_list) or (Elem_tp == maybe_improper_list)
+												              or (Elem_tp == nonempty_maybe_improper_list) or (Elem_tp == list)
+												              or (Elem_tp == undef_maybe_improper_list) or (Elem_tp == ungen_improper_list)
+												              or (Elem_tp == undef_nonempty_maybe_improper_list) ->
+	{Gen_lst, _} = generalize_lst({Elem_tp, Elem_val}, Elems_tbl),
+	Gen_lst;
+generalize_term({Elem_tp, Elem_val}, Elems_tbl) when (Elem_tp == ungen_tuple) or (Elem_tp == tuple) ->
+	generalize_tuple({Elem_tp, Elem_val}).
 
 
 convert_elems_tbl_to_internal_format([], Res) ->
@@ -322,7 +360,7 @@ upd_elems_tbl_with_new_elem({Elem_tp, Elem_val}, Elems_tbl) when (Elem_tp == emp
 												              or (Elem_tp == nonempty_list) or (Elem_tp == improper_list)
 												              or (Elem_tp == nonempty_improper_list) or (Elem_tp == maybe_improper_list)
 												              or (Elem_tp == nonempty_maybe_improper_list) or (Elem_tp == list)
-												              or (Elem_tp == undef_maybe_improper_list)
+												              or (Elem_tp == undef_maybe_improper_list) or (Elem_tp == ungen_improper_list)
 												              or (Elem_tp == undef_nonempty_maybe_improper_list) ->
 	upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?LISTS_SEC_INDEX);
 upd_elems_tbl_with_new_elem({Elem_tp, Elem_val}, Elems_tbl) when (Elem_tp == ungen_tuple) or (Elem_tp == tuple) ->
@@ -442,9 +480,9 @@ generalize_lst({Lst_tp, {empty_list, []}}, Elems_tbl) ->
 generalize_lst({ungen_list, [{'...', _Var_name} | T]}, Elems_tbl) ->
 	Upd_elems_tbl = setelement(?LISTS_SEC_INDEX, ?ELEMS_TBL, {nonempty_maybe_improper_list, []}),
 	{{undef_nonempty_maybe_improper_list, []}, Upd_elems_tbl};
-generalize_lst({Lst_tp, {ungen_list, Elems}}, Elems_tbl) ->
+generalize_lst({Lst_tp, {Tp, Elems}}, Elems_tbl) when (Tp == ungen_improper_list) or (Tp == ungen_list) ->
 	Lst_sec = {lists, [{undef_list, Elems_tbl}]},
-	{lists, [{Upd_lst_tp, Upd_elems_tbl}]} = upd_lst_sec_with_ungen_lst({ungen_list, Elems}, Lst_sec),
+	{lists, [{Upd_lst_tp, Upd_elems_tbl}]} = upd_lst_sec_with_ungen_lst({Tp, Elems}, Lst_sec),
 
 	Elems_tbl_secs = tuple_to_list(Upd_elems_tbl),
 	Gen_lst = build_lst(Upd_lst_tp, Elems_tbl_secs, []),
@@ -511,7 +549,7 @@ generalize_lst({Lst_tp, [{Elem_tp, Elem_val} | T]}, Elems_tbl) when (Elem_tp == 
 															      or (Elem_tp == nonempty_list) or (Elem_tp == improper_list)
 															      or (Elem_tp == nonempty_improper_list) or (Elem_tp == maybe_improper_list)
 																  or (Elem_tp == nonempty_maybe_improper_list) or (Elem_tp == list)
-																  or (Elem_tp == undef_maybe_improper_list)
+																  or (Elem_tp == undef_maybe_improper_list) or (Elem_tp == ungen_improper_list)
 																  or (Elem_tp == undef_nonempty_maybe_improper_list) ->
 	Upd_elems_tbl = upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?LISTS_SEC_INDEX),
 	generalize_lst({Lst_tp, T}, Upd_elems_tbl);
@@ -749,27 +787,6 @@ generalize_lst_tp(nonempty_improper_list, nonempty_list) ->
 	nonempty_maybe_improper_list;	
 generalize_lst_tp(nonempty_list, nonempty_improper_list) ->
 	nonempty_maybe_improper_list.
-
-
-bound_cons_elems({List_type1, []}, _) ->
-	[];
-
-bound_cons_elems({List_type1, [{variable, [Value]} | Elems1]}, {defined_list, [{Type2, Value2} | Elems2]}) ->
-	[{Value, {Type2, Value2}} | bound_cons_elems({List_type1, Elems1}, {defined_list, Elems2})];
-bound_cons_elems({List_type1, [{variable, [Value]} | Elems1]}, {list, [Elem2]}) ->
-	[{Value, Elem2} | bound_cons_elems({List_type1, Elems1}, {list, [Elem2]})];
-
-bound_cons_elems({List_type1, [{'...', [Value]} | Elems1]}, {defined_list, Elems2}) ->
-	[{Value, {defined_list, Elems2}}];
-
-bound_cons_elems({List_type1, [{'...', [Value]} | Elems1]}, {list, [{'...', [Value]} | Elems2]}) ->
-	{Value, {list, [{any, []}]}};
-bound_cons_elems({List_type1, [{'...', [Value]} | Elems1]}, {list, [Type2]}) ->
-	[{Value, {list, [Type2]}}];
-bound_cons_elems({List_type1, [Elem1 | Elems1]}, {defined_list, [Elem2 | Elems2]}) ->
-	bound_cons_elems({List_type1, Elems1}, {defined_list, Elems2});
-bound_cons_elems({List_type1, [Elem1 | Elems1]}, {list, [Elem2]}) ->
-	bound_cons_elems({List_type1, Elems1}, {list, [Elem2]}).
 
 
 are_matching_types(Type, Type) ->
@@ -1045,7 +1062,7 @@ convert_list_elems_in_basic_format_to_compound([H | T], Converted_values) ->
 convert_list_elems_in_basic_format_to_compound(Val, Converted_values) ->
 	Converted_value = convert_value_in_basic_format_to_compound(Val),
 	Reversed_values = lists:reverse(Converted_values),
-	{ungen_list, Reversed_values ++ Converted_value}.
+	{ungen_improper_list, Reversed_values ++ Converted_value}.
 
 convert_tuple_elems_in_basic_format_to_compound([]) -> [];
 convert_tuple_elems_in_basic_format_to_compound([H | T]) ->
@@ -1058,7 +1075,7 @@ convert_value_in_basic_format_to_compound({Tp, Val}) when (Tp == empty_list) or 
 														   or (Tp == nonempty_list) or (Tp == improper_list)
 														   or (Tp == nonempty_improper_list) or (Tp == maybe_improper_list)
 														   or (Tp == nonempty_maybe_improper_list) or (Tp == list)
-														   or (Tp == undef_maybe_improper_list)
+														   or (Tp == undef_maybe_improper_list) or (Tp == ungen_improper_list)
 														   or (Tp == undef_nonempty_maybe_improper_list)
 														   or (Tp == tuple) or (Tp == union) -> 
 	{Tp, Val};
@@ -1401,7 +1418,7 @@ test() ->
 	erlang:display({test16, ei4, Test16 == [{ungen_list,[{integer,[1]},{integer,[1]},{integer,[2]}]}]}),
 
 	Test17 = infer_fun_type(unit_test, ei5, 0, []),
-	erlang:display({test17, ei5, Test17 == [{ungen_list,[{integer,[1]}|{integer,[2]}]}]}),
+	erlang:display({test17, ei5, Test17 == [{ungen_improper_list,[{integer,[1]}|{integer,[2]}]}]}),
 
 	Test18 = infer_fun_type(unit_test, ei6, 1, []),
 	erlang:display({test18, ei6, Test18 == [{ungen_list,[{integer,[1]}, {integer,[2]}, {integer,[3]}, {'...', ["A"]}]}]}),
@@ -1853,6 +1870,9 @@ u(Elems) ->
 t(Tuple) ->
 	A = c(Tuple),
 	generalize_tuple(A).
+
+i(Mod_name, Fun_name, Arity) ->
+	infer_fun_type(Mod_name, Fun_name, Arity, []).
 
 
 
