@@ -59,23 +59,16 @@ get_clauses_type([Clause | Clauses], [Clause_variables | All_variables]) ->
 	[get_clause_type(Clause, Clause_variables) | get_clauses_type(Clauses, All_variables)].
 
 define_bodies_type([], _) -> [];
-define_bodies_type([Last_body], Variables) ->
-	Clause_type = infer_expr_inf(Last_body, Variables),
+define_bodies_type([Last_body], Vars) ->
+	{Clause_type, _Upd_vars} = infer_expr_inf(Last_body, Vars),
 
 	case Clause_type of
 		{Var_name, {Type, Value}} -> {Type, Value};
 		_                         -> Clause_type
 	end;
-define_bodies_type([Body | Bodies], Variables) ->
-	Body_type = infer_expr_inf(Body, Variables),
-
-	%erlang:display(Body_type),
-
-	case Body_type of
-		{_Var_name, {_Type, _Value}} -> define_bodies_type(Bodies, [Body_type | Variables]);
-		Type when is_list(Type) -> define_bodies_type(Bodies, Body_type ++ Variables);
-		_                  -> define_bodies_type(Bodies, Variables)
-	end.
+define_bodies_type([Body | Bodies], Vars) ->
+	{_Body_type, Upd_vars} = infer_expr_inf(Body, Vars),
+	define_bodies_type(Bodies, Upd_vars).
 
 find_actual_clauses(Mod_name, Fun_name, Arity, Actual_params) ->
 	Fun_node = get_fun_node(Mod_name, Fun_name, Arity),
@@ -92,19 +85,20 @@ find_actual_clauses(Mod_name, Fun_name, Arity, Actual_params) ->
 
 %---------------------------------Inference part-----------------------------------------------
 
-infer_expr_inf(Expr, Variables) ->
+infer_expr_inf(Expr, Vars) ->
 	case ?Expr:type(Expr) of
-		prefix_expr -> infer_prefix_expr_type(Expr, ?Expr:value(Expr), Variables);
-		match_expr -> infer_match_expr_inf(Expr, Variables);
-		infix_expr -> infer_infix_expr_type(Expr, ?Expr:value(Expr), Variables);
-		variable   -> infer_var_type(Expr, Variables);
-		parenthesis -> infer_parenthesis_inf(Expr, Variables);
-		fun_expr    -> {fun_expr, Expr};
-		application -> infer_fun_app_type(Expr, Variables);
-		cons        -> infer_cons_expr_type(Expr, Variables);
-		tuple       -> infer_tuple_expr_type(Expr,Variables);
-		implicit_fun -> infer_implicit_fun_expr(Expr, Variables);
-		Simple_type    -> infer_simple_type(Expr)
+		prefix_expr -> {infer_prefix_expr_type(Expr, ?Expr:value(Expr), Vars), Vars};
+		match_expr -> infer_match_expr_inf(Expr, Vars);
+		infix_expr -> {infer_infix_expr_type(Expr, ?Expr:value(Expr), Vars), Vars};
+		variable   -> {infer_var_type(Expr, Vars), Vars};
+		parenthesis -> {infer_parenthesis_inf(Expr, Vars), Vars};
+		fun_expr    -> Fun_expr = {fun_expr, Expr},
+		               {Fun_expr, Vars};
+		application -> {infer_fun_app_type(Expr, Vars), Vars};
+		cons        -> {infer_cons_expr_type(Expr, Vars), Vars};
+		tuple       -> {infer_tuple_expr_type(Expr,Vars), Vars};
+		implicit_fun -> {infer_implicit_fun_expr(Expr, Vars), Vars};
+		Simple_type    -> {infer_simple_type(Expr), Vars}
 	end.
 
 infer_implicit_fun_expr(Implicit_fun_expr, Variables) ->
@@ -118,12 +112,12 @@ infer_implicit_fun_expr(Implicit_fun_expr, Variables) ->
 				{implicit_fun, {{current_mod, ?Mod:name(Fun_mod)}, ?Expr:value(Fun_info_expr), ?Expr:value(Arity_expr)}}
 	end.
 
-infer_var_type(Expr, Variables) ->
-	Var = find_variable_by_name(?Expr:value(Expr), Variables),	
+infer_var_type(Var_expr, Vars) ->
+	Var = find_var_by_name(?Expr:value(Var_expr), Vars),	
 
 	case Var of 
-		[] -> {any, []};
-		[{_Var_name, {Type, Value}}] -> {Type, Value}
+		[]                       -> {any, []};
+		[{_Var_name, {Tp, Val}}] -> {Tp, Val}
 	end.
 
 infer_simple_type(Expr) ->
@@ -142,25 +136,25 @@ infer_tuple_expr_type(Expr, Variables) ->
 	Tuple_in_basic_format = list_to_tuple(Tuple_elems_list),
 	convert_value_in_basic_format_to_compound(Tuple_in_basic_format).
 
-infer_fun_app_type(Fun_app, Variables) ->
+infer_fun_app_type(Fun_app, Vars) ->
 	[Expr, Arg_list] = ?Query:exec(Fun_app, ?Expr:children()),
 
 	case ?Expr:type(Expr) of 
-			variable -> infer_anonymus_function(?Expr:value(Expr), Arg_list, Variables);
+			variable -> infer_anonymus_function(?Expr:value(Expr), Arg_list, Vars);
 			_        ->	case ?Expr:value(Expr) of
 							':'      -> [Module, Fun] = ?Query:exec(Expr, ?Expr:children()),
-										infer_external_fun(?Expr:value(Module), ?Expr:value(Fun), Arg_list, Variables);
+										infer_external_fun(?Expr:value(Module), ?Expr:value(Fun), Arg_list, Vars);
 							_        -> Function = ?Query:exec(Fun_app, ?Expr:function()),
 						                [Fun_mod] = ?Query:exec(Function, ?Fun:module()),
-										infer_internal_fun(?Mod:name(Fun_mod), ?Expr:value(Expr), Arg_list, Variables)
+										infer_internal_fun(?Mod:name(Fun_mod), ?Expr:value(Expr), Arg_list, Vars)
 						end
 	end.
 
-find_variable_by_name(Required_var_Name, Variables) ->
+find_var_by_name(Required_var_Name, Variables) ->
 	lists:filter(fun({Var_name, _}) -> Required_var_Name == Var_name end, Variables).
 
 is_bounded(Variable_name, Variables) ->
-	Variable = find_variable_by_name(Variable_name, Variables),
+	Variable = find_var_by_name(Variable_name, Variables),
 
 	case Variable of
 		[] -> false;
@@ -168,30 +162,37 @@ is_bounded(Variable_name, Variables) ->
 	end.
 
 infer_anonymus_function(Var_name, Arg_list_expr, Variables) ->
-	case find_variable_by_name(Var_name, Variables) of
-		[]                          -> infer_anonymus_func_app_without_body(Arg_list_expr, Variables);
-		[{Var_name, {fun_expr, _}}] -> infer_anonymus_func_app(Var_name, Arg_list_expr, Variables);
+	case find_var_by_name(Var_name, Variables) of
+		[]                          -> infer_anon_func_app_without_body(Arg_list_expr, Variables);
+		[{Var_name, {fun_expr, _}}] -> infer_anon_func_app(Var_name, Arg_list_expr, Variables);
 		[{Var_name, {implicit_fun, {{current_mod, Mod_name}, Fun_name, _Arity}}}] -> infer_internal_fun(Mod_name, Fun_name, Arg_list_expr, Variables);
 		[{Var_name, {implicit_fun, {{external_mod, Mod_name}, Fun_name, _Arity}}}] -> infer_external_fun(Mod_name, Fun_name, Arg_list_expr, Variables);
 		_                           -> {none, []}
 	end.
 
-infer_anonymus_func_app_without_body(Arg_list_expr, Variables) ->
-	Arg_list_children = ?Query:exec(Arg_list_expr, ?Expr:children()),
-	Arg_list = lists:map(fun(Arg) -> infer_expr_inf(Arg, []) end, Arg_list_children),
-	{func, [Arg_list, [any]]}.
+infer_anon_func_app_without_body(Arg_lst_expr, _Vars) ->
+	Arg_lst_children = ?Query:exec(Arg_lst_expr, ?Expr:children()),
+	Fun = fun(Arg) -> {Tp, _} = infer_expr_inf(Arg, []),
+	 				  Tp 
+	end,
 
-infer_anonymus_func_app(Var_name, Arg_list_expr, Variables) ->
-	[{_Var_name, {fun_expr, Fun_expr}}] = find_variable_by_name(Var_name, Variables),
-	Arg_list_children = ?Query:exec(Arg_list_expr, ?Expr:children()),
-	Arg_list = lists:map(fun(Arg) -> infer_expr_inf(Arg, Variables) end, Arg_list_children),
+	Arg_lst = lists:map(Fun, Arg_lst_children),
+	{func, [Arg_lst, [any]]}.
 
+infer_anon_func_app(Var_name, Arg_lst_expr, Vars) ->
+	[{_Var_name, {fun_expr, Fun_expr}}] = find_var_by_name(Var_name, Vars),
+	Arg_list_children = ?Query:exec(Arg_lst_expr, ?Expr:children()),
+	Fun = fun(Arg) -> {Tp, _} = infer_expr_inf(Arg, Vars),
+				      Tp 
+	end,
+
+	Arg_list = lists:map(Fun, Arg_list_children),
 
 	Clause = ?Query:exec(Fun_expr, ?Expr:clauses()),
 	Patterns = ?Query:exec(Clause, ?Clause:patterns()),
 	[Fun_expr_vars] = replace_clauses_params_with_args([Patterns], Arg_list),
 
-	New_var_list = replace_shadowed_vars_vals(Fun_expr_vars, Variables),
+	New_var_list = replace_shadowed_vars_vals(Fun_expr_vars, Vars),
 	
 	get_clause_type(Clause, New_var_list).
 
@@ -219,7 +220,12 @@ infer_external_fun(Mod_name, Fun_name, Arg_list_expr, Variables) ->
 
 infer_internal_fun(Mod_name, Fun_name, Arg_list_expr, Parent_fun_variables) ->
 	Arg_list_children = ?Query:exec(Arg_list_expr, ?Expr:children()),
-	Arg_list = lists:map(fun(Arg) -> infer_expr_inf(Arg, Parent_fun_variables) end, Arg_list_children),
+
+	Fun = fun(Arg) -> {Tp, _} = infer_expr_inf(Arg, Parent_fun_variables),
+		              Tp
+	end,
+
+	Arg_list = lists:map(Fun, Arg_list_children),
 	Arity = length(Arg_list),
 	Actual_clauses_with_pats = find_actual_clauses(Mod_name, Fun_name, Arity, Arg_list_children),
 	Actual_clauses = lists:map(fun({Clause, _}) -> Clause end, Actual_clauses_with_pats),
@@ -243,48 +249,30 @@ replace_clause_params_with_args([Par | Pars], [Arg | Args]) ->
 		_        -> replace_clause_params_with_args(Pars, Args)
 	end.
 
-infer_parenthesis_inf(Expr, Variables) ->
+infer_parenthesis_inf(Expr, Vars) ->
 	[Child] = get_children(Expr),
-	infer_expr_inf(Child, Variables).
+	infer_expr_inf(Child, Vars).
 
-infer_match_expr_inf(Expr, Variables) ->
+infer_match_expr_inf(Expr, Vars) ->
 	[Leftside_expr, Rightside_expr] = get_children(Expr),
 
 	case ?Expr:type(Leftside_expr) of
-		variable -> bound_a_single_var(Leftside_expr, Rightside_expr, Variables);
-		cons     -> bound_cons(Leftside_expr, Rightside_expr, Variables)
+		variable -> bound_a_single_var(Leftside_expr, Rightside_expr, Vars)
 	end.
 
 	%{?Expr:value(Leftside_expr), infer_expr_inf(Rightside_expr, Variables)}.
 
-bound_a_single_var(Rightside_expr, Leftside_expr, Variables) ->
-	Right_var_name = ?Expr:value(Rightside_expr),
-	Is_bounded = is_bounded(Right_var_name, Variables),
-	
+bound_a_single_var(Leftside_expr, Rightside_expr, Vars) ->
+	Var_name = ?Expr:value(Leftside_expr),
+	Is_bounded = is_bounded(Var_name, Vars),
 
 	case Is_bounded of
-		true  -> Variable1_type = infer_expr_inf(Rightside_expr, Variables),
-				 Variable2_type = infer_expr_inf(Leftside_expr, Variables),
-
-				 case are_matching_types(Variable1_type, Variable2_type) of
-				 	true -> {?Expr:value(Rightside_expr), Variable1_type};
-				 	false -> {none, []}
-				 end;
-		false -> {?Expr:value(Rightside_expr), infer_expr_inf(Leftside_expr, Variables)}
-	end.	
-
-bound_cons(Leftside_cons, Rightside_expr, Variables) ->
-	Leftside_cons_type = infer_expr_inf(Leftside_cons, Variables),
-	Rightside_expr_type = infer_expr_inf(Rightside_expr, Variables),
-
-	Are_matching_types = are_matching_types(Leftside_cons_type, Rightside_expr_type),
-
-	case Are_matching_types of
-		true ->  Generalized_list_type = generalize_lst(Rightside_expr_type, ?ELEMS_TBL),
-				 bound_cons_elems(Leftside_cons_type, Generalized_list_type);
-		false -> {none, []}
+		true  -> infer_expr_inf(Leftside_expr, Vars);
+		false -> {Rightside_tp, Upd_vars} = infer_expr_inf(Rightside_expr, Vars),
+				 New_var_name = ?Expr:value(Leftside_expr), 
+				 New_var = {New_var_name, Rightside_tp},
+				 {New_var, [New_var | Upd_vars]}
 	end.
-
 
 generalize_elems(Elems, []) ->
 	generalize_elems(Elems, ?ELEMS_TBL);
@@ -886,16 +874,16 @@ are_lists_elems_matching({Type1, [Elem1 | Elems1]}, {Type2, []}) ->
 are_lists_elems_matching({Type1, []}, {Type2, [Elem2 | Elems2]}) ->
 	false.
 
-infer_infix_expr_type(Expr, Operation, Variables) ->
+infer_infix_expr_type(Expr, Operation, Vars) ->
 	[Sub_expr1, Sub_expr2] = get_children(Expr),
-	Expr_inf1 = infer_expr_inf(Sub_expr1, Variables),
-	Expr_inf2 = infer_expr_inf(Sub_expr2, Variables),
+	{Expr_inf1, Upd_vars} = infer_expr_inf(Sub_expr1, Vars),
+	{Expr_inf2, _Upd_vars2} = infer_expr_inf(Sub_expr2, Upd_vars),
 %Добавить проверку на правильность типа	
 	compute_infix_expr(Expr_inf1, Expr_inf2, Operation).
 
-infer_prefix_expr_type(Expr, Operation, Variables) ->
+infer_prefix_expr_type(Expr, Operation, Vars) ->
 	[Sub_expr] = ?Query:exec(Expr, ?Expr:children()),
-	Sub_expr_inf = infer_expr_inf(Sub_expr, Variables),
+	{Sub_expr_inf, _Upd_vars} = infer_expr_inf(Sub_expr, Vars),
 	compute_prefix_expr(Sub_expr_inf, Operation).
 
 compute_prefix_expr({union, Union_elems}, Operation) -> 
@@ -1279,7 +1267,7 @@ extract_expr_val(Expr, Variables) ->
 
 define_var_value(Var_expr, Variables) ->
 	Var_name = ?Expr:value(Var_expr),
-	Variable = find_variable_by_name(Var_name, Variables),
+	Variable = find_var_by_name(Var_name, Variables),
 
 	case Variable of
 		[] -> {variable, [Var_name]};
