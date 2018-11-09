@@ -66,18 +66,7 @@ define_bodies_type([Body | Bodies], Vars) ->
 	{_Body_type, Upd_vars} = infer_expr_inf(Body, Vars),
 	define_bodies_type(Bodies, Upd_vars).
 
-find_actual_clauses(Mod_name, Fun_name, Arity, Actual_params) ->
-	Fun_node = get_fun_node(Mod_name, Fun_name, Arity),
-	Fun_def = get_fundef(Fun_node),
-	Clauses = get_clauses(Fun_def),
-	Patterns = [get_patterns(Clause) || Clause <- Clauses],
 
-	case Actual_params of
-		[] -> 	Fun_def = Fun_def,
-				[Clause] = get_clauses(Fun_def),
-				[{Clause, []}];
-		_  ->   find_actual_clause(Patterns, Actual_params)   
-	end.
 
 %---------------------------------Inference part-----------------------------------------------
 
@@ -236,11 +225,17 @@ infer_internal_fun(Mod_name, Fun_name, Arg_list_expr, Parent_fun_variables) ->
 
 	Arg_list = lists:map(Fun, Arg_list_children),
 	Arity = length(Arg_list),
-	Actual_clauses_with_pats = find_actual_clauses(Mod_name, Fun_name, Arity, Arg_list_children),
-	Actual_clauses = lists:map(fun({Clause, _}) -> Clause end, Actual_clauses_with_pats),
-	Clauses_patterns = lists:map(fun({_, Pat}) -> Pat end, Actual_clauses_with_pats),
-	Variables = replace_clauses_params_with_args(Clauses_patterns, Arg_list),
-	Fun_type = get_clauses_type(Actual_clauses, Variables),
+	%Actual_clauses_with_pats = find_actual_clauses(Mod_name, Fun_name, Arity, Arg_list_children),
+	%Actual_clauses = lists:map(fun({Clause, _}) -> Clause end, Actual_clauses_with_pats),
+	%Clauses_patterns = lists:map(fun({_, Pat}) -> Pat end, Actual_clauses_with_pats),
+
+	Fun_node = get_fun_node(Mod_name, Fun_name, Arity),
+	Fun_def = get_fundef(Fun_node),
+	Clauses = get_clauses(Fun_def),
+	Patterns = [get_patterns(Clause) || Clause <- Clauses],
+
+	Variables = replace_clauses_params_with_args(Patterns, Arg_list),
+	Fun_type = get_clauses_type(Clauses, Variables),
 
 	case length(Fun_type) of
 		1 -> hd(Fun_type);
@@ -824,107 +819,7 @@ generalize_lst_tp(nonempty_list, nonempty_improper_list) ->
 	nonempty_maybe_improper_list.
 
 
-are_matching_types(Type, Type) ->
-	true;
 
-are_matching_types({any, _Val1}, _Type2) ->
-	true;
-are_matching_types(_Type1, {any, _Val2}) ->
-	true;
-
-are_matching_types({number, _Val1}, {Type2, _Val2}) when ((Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) or (Type2 == float) or (Type2 == number)) ->
-	true;
-are_matching_types({Tp1, _Val1}, {number, _Val2}) when (Tp1 == neg_integer) or (Tp1 == pos_integer) or (Tp1 == non_neg_integer) or (Tp1 == integer) or (Tp1 == float) or (Tp1 == number) ->
-	true;
-
-are_matching_types({_Type1, [Value]}, {_Type2, [Value]}) when is_number(Value) ->
-	true;
-
-are_matching_types({neg_integer, [_Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == integer) ->
-	true;
-are_matching_types({pos_integer, [_Value]}, {Type2, []}) when (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
-	true;
-are_matching_types({non_neg_integer, [_Value]}, {Type2, []}) when (Type2 == non_neg_integer) or (Type2 == integer) ->
-	true;
-are_matching_types({integer, [_Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
-	true;
-
-are_matching_types({Type1, []}, {neg_integer, [_Value]}) when (Type1 == neg_integer) or (Type1 == integer) ->
-	true;
-are_matching_types({Type1, []}, {pos_integer, [_Value]}) when (Type1 == pos_integer) or (Type1 == non_neg_integer) or (Type1 == integer) ->
-	true;
-are_matching_types({Type1, []}, {non_neg_integer, [_Value]}) when (Type1 == non_neg_integer) or (Type1 == integer) ->
-	true;
-are_matching_types({Type1, []}, {integer, [_Value]}) when (Type1 == neg_integer) or (Type1 == pos_integer) or (Type1 == non_neg_integer) or (Type1 == integer) ->
-	true;
-
-are_matching_types({neg_integer, [_Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == integer) ->
-	true;
-are_matching_types({pos_integer, [_Value]}, {Type2, []}) when (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
-	true;
-are_matching_types({non_neg_integer, [_Value]}, {Type2, []}) when (Type2 == non_neg_integer) or (Type2 == integer) ->
-	true;
-are_matching_types({integer, [_Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
-	true;	
-
-
-are_matching_types({Type, [Value1]}, {Type, [Value2]}) when Value1 == Value2 ->
-	true;
-are_matching_types({Type, [_Value]}, {Type, []}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun) ->
-	true;
-are_matching_types({Type, []}, {Type, [_Value]}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun)->
-	true;
-are_matching_types({Type, []}, {Type, []}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun)->
-	true;
-
-are_matching_types({variable, _Value}, _Type2) ->
-	true;
-are_matching_types(_Type1, {variable, _Value}) ->
-	true;
-
-are_matching_types({Type1, Vals1}, {Type2, Vals2}) when ((Type1 == defined_list) or (Type1 == list) or (Type1 == nonempty_list) or (Type1 == improper_list)) and
-														((Type2 == defined_list) or (Type2 == list) or (Type2 == nonempty_list) or (Type2 == improper_list)) ->
-	are_matching_lists({Type1, Vals1}, {Type2, Vals2});
-
-are_matching_types(_Type1, _Type2) ->
-	false.
-
-are_matching_lists(List, List) ->
-	true;
-are_matching_lists({empty_list, []}, {list, _Val}) ->
-	true;
-are_matching_lists({list, _Val}, {empty_list, []}) ->
-	true;
-are_matching_lists(List1, List2) ->
-	are_lists_elems_matching(List1, List2).
-
-
-are_lists_elems_matching({_Type1, []}, {_Type2, []}) ->
-	true;
-are_lists_elems_matching({_Type1, _Elems1}, {nonempty_list, [{'...', _}]}) ->
-	true;
-are_lists_elems_matching({nonempty_list, [{'...', _}]}, {_Type2, _Elems2}) ->
-	true;
-are_lists_elems_matching({defined_list, [Elem1 | Elems1]}, {defined_list, [Elem2 | Elems2]}) ->
-	are_matching_types(Elem1, Elem2) and are_lists_elems_matching({defined_list, Elems1}, {defined_list, Elems2});
-
-are_lists_elems_matching({defined_list, [Elem1 | Elems1]}, {nonempty_list, [Elem2 | Elems2]}) ->
-	are_matching_types(Elem1, Elem2) and are_lists_elems_matching({defined_list, Elems1}, {nonempty_list, Elems2});
-are_lists_elems_matching({nonempty_list, [Elem1 | Elems1]}, {defined_list, [Elem2 | Elems2]}) ->
-	are_matching_types(Elem1, Elem2) and are_lists_elems_matching({nonempty_list, Elems1}, {defined_list, Elems2});
-
-are_lists_elems_matching({_List1_type, [Elem1 | _Elems1]}, {list, [Elem2]}) ->
-	are_matching_types(Elem1, Elem2);
-are_lists_elems_matching({list, [Elem1]}, {_List2_type, [Elem2 | _Elems2]}) ->
-	are_matching_types(Elem1, Elem2);
-
-are_lists_elems_matching({nonempty_list, [Elem1 | Elems1]}, {nonempty_list, [Elem2 | Elems2]}) ->
-	are_matching_types(Elem1, Elem2) and are_lists_elems_matching(Elems1, Elems2);
-
-are_lists_elems_matching({_Type1, [_Elem1 | _Elems1]}, {_Type2, []}) ->
-	false;
-are_lists_elems_matching({_Type1, []}, {_Type2, [_Elem2 | _Elems2]}) ->
-	false.
 
 infer_infix_expr_type(Expr, Operation, Vars) ->
 	[Sub_expr1, Sub_expr2] = get_children(Expr),
@@ -1138,29 +1033,7 @@ convert_value_in_basic_format_to_compound(Val) when is_tuple(Val) ->
 	Tuple_elems_list = tuple_to_list(Val),
 	{ungen_tuple, convert_tuple_elems_in_basic_format_to_compound(Tuple_elems_list)}.
 
-convert_values_in_compound_format_to_basic([]) -> [];
-convert_values_in_compound_format_to_basic({empty_list, []}) ->
-	{empty_list, []};
-convert_values_in_compound_format_to_basic([H | T]) ->
-	[convert_value_in_compound_format_to_basic(H) | convert_values_in_compound_format_to_basic(T)];
-convert_values_in_compound_format_to_basic(Val) ->
-	convert_value_in_compound_format_to_basic(Val).
 
-convert_value_in_compound_format_to_basic({empty_list, []}) -> 
-	[];
-convert_value_in_compound_format_to_basic({'...', Val}) -> 
-	{'...', Val};
-convert_value_in_compound_format_to_basic({Type, []}) ->
-	{Type, []};
-convert_value_in_compound_format_to_basic({Type, [Val]}) when is_integer(Type) or is_float(Type) or is_atom(Type) or is_boolean(Type) ->
-	Val;
-convert_value_in_compound_format_to_basic({variable, Val}) ->
-	{variable, Val};
-convert_value_in_compound_format_to_basic({List_type, Values}) when (List_type == ungen_list) ->
-	convert_values_in_compound_format_to_basic(Values);
-convert_value_in_compound_format_to_basic({tuple, Values}) ->
-	Tuple_elems_list = convert_values_in_compound_format_to_basic(Values),
-	list_to_tuple(Tuple_elems_list).
 
 get_path(Mod_name) ->
 	Mod = ?Query:exec(?Mod:find(Mod_name)),
@@ -1195,99 +1068,6 @@ get_actual_params(Application) ->
 	?Query:exec(Args_list, ?Expr:children()).	
 
 %----------------------------------Defining actual clauses-------------------------------------
-find_actual_clause([], _) -> [];
-find_actual_clause([Pat | Pats], Pars) ->
-	Res = compare_terms(Pat, Pars),
-
-	case Res of 
-		true     -> [Clause] = ?Query:exec(hd(Pat), ?Expr:clause()),
-				    [{Clause, Pat}];
-		possibly -> [Clause] = ?Query:exec(hd(Pat), ?Expr:clause()),
-				 	[{Clause, Pat} | find_actual_clause(Pats, Pars)];
-		false    -> find_actual_clause(Pats, Pars)
-	end.	
-
-compare_terms([], []) -> true;
-compare_terms([Pat | Pats], [Par | Pars]) ->
-	Param_type = ?Expr:type(Par),
-	Pat_type = ?Expr:type(Pat),
-
-	case {Param_type, Pat_type} of
-		{cons, cons}     -> case compare_cons(Pat, Par) of
-						   		true  -> compare_terms(Pats, Pars);
-						   		possibly -> compare_terms(Pats, Pars);
-								false -> false
-							end;
-		{tuple, tuple} -> case compare_tuples(Pat, Par) of
-						   		true  -> compare_terms(Pats, Pars);
-						   		possibly -> compare_terms(Pats, Pars);
-								false -> false
-							end;
-		{_, variable}    -> possibly;
-		{variable, _}    -> possibly;
-		_                -> case compare_simple_type(Pat, Par) of
-								true  -> compare_terms(Pats, Pars);
-								possibly -> compare_terms(Pats, Pars);
-								false -> false
-							end
-	end.
-
-compare_tuples(T1, T2) ->
-	Children1 = ?Query:exec(T1, ?Expr:children()),
-	Children2 = ?Query:exec(T2, ?Expr:children()),
-
-	if
-		length(Children1) == length(Children2) -> compare_terms(Children1, Children2);
-		true                                   -> false
-	end.
-
-compare_cons(Con1, Con2) ->
-	List_elems1 = construct_list_from_cons_expr(Con1, []),
-	List_elems2 = construct_list_from_cons_expr(Con2, []),
-
-	compare_lists_elems(List_elems1, List_elems2, true).
-
-compare_simple_type(Pat, Par) ->
-	?Expr:value(Pat) =:= ?Expr:value(Par).
-
-compare_lists_elems(_, _, false) ->
-	false;
-compare_lists_elems(L, L, Status) -> Status;
-compare_lists_elems([{'...', _Value}], _, _) ->
-	possibly;
-compare_lists_elems(_, [{'...', _Value}], _) ->
-	possibly;
-compare_lists_elems([], _L2, _) ->
-	false;
-compare_lists_elems(_L1, [], _) ->
-	false;
-compare_lists_elems([{variable, _} | T1], [_ | T2], _) ->
-	compare_lists_elems(T1, T2, possibly);
-compare_lists_elems([_ | T1], [{variable, _} | T2], _) ->
-	compare_lists_elems(T1, T2, possibly);
-compare_lists_elems([H1 | T1], [H2 | T2], Status) when erlang:is_list(H1) and erlang:is_list(H2) ->
-	Result = compare_lists_elems(H1, H2, Status),
-
-	case Result of
-		false -> false;
-		possibly -> compare_lists_elems(T1, T2, possibly);
-		true     -> compare_lists_elems(T1, T2, Status)
-	end;
-compare_lists_elems([H1 | T1], [H2 | T2], Status) when erlang:is_tuple(H1) and erlang:is_tuple(H2) ->
-	Tuple1 = erlang:tuple_to_list(H1),
-	Tuple2 = erlang:tuple_to_list(H2),
-	Result = compare_lists_elems(Tuple1, Tuple2, Status),
-
-	case Result of
-		false -> false;
-		possibly -> compare_lists_elems(T1, T2, possibly);
-		true     -> compare_lists_elems(T1, T2, Status)
-	end;
-compare_lists_elems([H1 | T1], [H2 | T2], Status) ->
-	case H1 == H2 of
-		true -> compare_lists_elems(T1, T2, Status);
-		false -> false
-	end.
 
 extract_expr_vals([], _) -> [];
 extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Vars) ->
@@ -1973,4 +1753,242 @@ define_simple_type(A) ->
 		[{match, [A]}, _, _] -> erlang:list_to_float(A);
 		[_, {match, [A]}, _] -> erlang:list_to_integer(A);
 		[_, _, {match, [A]}] -> erlang:list_to_atom(lists:droplast(tl(A)))
+	end.
+
+%-----------------Код ненужный на данный момент-------------
+are_matching_types(Type, Type) ->
+	true;
+
+are_matching_types({any, _Val1}, _Type2) ->
+	true;
+are_matching_types(_Type1, {any, _Val2}) ->
+	true;
+
+are_matching_types({number, _Val1}, {Type2, _Val2}) when ((Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) or (Type2 == float) or (Type2 == number)) ->
+	true;
+are_matching_types({Tp1, _Val1}, {number, _Val2}) when (Tp1 == neg_integer) or (Tp1 == pos_integer) or (Tp1 == non_neg_integer) or (Tp1 == integer) or (Tp1 == float) or (Tp1 == number) ->
+	true;
+
+are_matching_types({_Type1, [Value]}, {_Type2, [Value]}) when is_number(Value) ->
+	true;
+
+are_matching_types({neg_integer, [_Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == integer) ->
+	true;
+are_matching_types({pos_integer, [_Value]}, {Type2, []}) when (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
+	true;
+are_matching_types({non_neg_integer, [_Value]}, {Type2, []}) when (Type2 == non_neg_integer) or (Type2 == integer) ->
+	true;
+are_matching_types({integer, [_Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
+	true;
+
+are_matching_types({Type1, []}, {neg_integer, [_Value]}) when (Type1 == neg_integer) or (Type1 == integer) ->
+	true;
+are_matching_types({Type1, []}, {pos_integer, [_Value]}) when (Type1 == pos_integer) or (Type1 == non_neg_integer) or (Type1 == integer) ->
+	true;
+are_matching_types({Type1, []}, {non_neg_integer, [_Value]}) when (Type1 == non_neg_integer) or (Type1 == integer) ->
+	true;
+are_matching_types({Type1, []}, {integer, [_Value]}) when (Type1 == neg_integer) or (Type1 == pos_integer) or (Type1 == non_neg_integer) or (Type1 == integer) ->
+	true;
+
+are_matching_types({neg_integer, [_Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == integer) ->
+	true;
+are_matching_types({pos_integer, [_Value]}, {Type2, []}) when (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
+	true;
+are_matching_types({non_neg_integer, [_Value]}, {Type2, []}) when (Type2 == non_neg_integer) or (Type2 == integer) ->
+	true;
+are_matching_types({integer, [_Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
+	true;	
+
+
+are_matching_types({Type, [Value1]}, {Type, [Value2]}) when Value1 == Value2 ->
+	true;
+are_matching_types({Type, [_Value]}, {Type, []}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun) ->
+	true;
+are_matching_types({Type, []}, {Type, [_Value]}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun)->
+	true;
+are_matching_types({Type, []}, {Type, []}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun)->
+	true;
+
+are_matching_types({variable, _Value}, _Type2) ->
+	true;
+are_matching_types(_Type1, {variable, _Value}) ->
+	true;
+
+are_matching_types({Type1, Vals1}, {Type2, Vals2}) when ((Type1 == defined_list) or (Type1 == list) or (Type1 == nonempty_list) or (Type1 == improper_list)) and
+														((Type2 == defined_list) or (Type2 == list) or (Type2 == nonempty_list) or (Type2 == improper_list)) ->
+	are_matching_lists({Type1, Vals1}, {Type2, Vals2});
+
+are_matching_types(_Type1, _Type2) ->
+	false.
+
+are_matching_lists(List, List) ->
+	true;
+are_matching_lists({empty_list, []}, {list, _Val}) ->
+	true;
+are_matching_lists({list, _Val}, {empty_list, []}) ->
+	true;
+are_matching_lists(List1, List2) ->
+	are_lists_elems_matching(List1, List2).
+
+
+are_lists_elems_matching({_Type1, []}, {_Type2, []}) ->
+	true;
+are_lists_elems_matching({_Type1, _Elems1}, {nonempty_list, [{'...', _}]}) ->
+	true;
+are_lists_elems_matching({nonempty_list, [{'...', _}]}, {_Type2, _Elems2}) ->
+	true;
+are_lists_elems_matching({defined_list, [Elem1 | Elems1]}, {defined_list, [Elem2 | Elems2]}) ->
+	are_matching_types(Elem1, Elem2) and are_lists_elems_matching({defined_list, Elems1}, {defined_list, Elems2});
+
+are_lists_elems_matching({defined_list, [Elem1 | Elems1]}, {nonempty_list, [Elem2 | Elems2]}) ->
+	are_matching_types(Elem1, Elem2) and are_lists_elems_matching({defined_list, Elems1}, {nonempty_list, Elems2});
+are_lists_elems_matching({nonempty_list, [Elem1 | Elems1]}, {defined_list, [Elem2 | Elems2]}) ->
+	are_matching_types(Elem1, Elem2) and are_lists_elems_matching({nonempty_list, Elems1}, {defined_list, Elems2});
+
+are_lists_elems_matching({_List1_type, [Elem1 | _Elems1]}, {list, [Elem2]}) ->
+	are_matching_types(Elem1, Elem2);
+are_lists_elems_matching({list, [Elem1]}, {_List2_type, [Elem2 | _Elems2]}) ->
+	are_matching_types(Elem1, Elem2);
+
+are_lists_elems_matching({nonempty_list, [Elem1 | Elems1]}, {nonempty_list, [Elem2 | Elems2]}) ->
+	are_matching_types(Elem1, Elem2) and are_lists_elems_matching(Elems1, Elems2);
+
+are_lists_elems_matching({_Type1, [_Elem1 | _Elems1]}, {_Type2, []}) ->
+	false;
+are_lists_elems_matching({_Type1, []}, {_Type2, [_Elem2 | _Elems2]}) ->
+	false.
+
+
+
+
+convert_values_in_compound_format_to_basic([]) -> [];
+convert_values_in_compound_format_to_basic({empty_list, []}) ->
+	{empty_list, []};
+convert_values_in_compound_format_to_basic([H | T]) ->
+	[convert_value_in_compound_format_to_basic(H) | convert_values_in_compound_format_to_basic(T)];
+convert_values_in_compound_format_to_basic(Val) ->
+	convert_value_in_compound_format_to_basic(Val).
+
+convert_value_in_compound_format_to_basic({empty_list, []}) -> 
+	[];
+convert_value_in_compound_format_to_basic({'...', Val}) -> 
+	{'...', Val};
+convert_value_in_compound_format_to_basic({Type, []}) ->
+	{Type, []};
+convert_value_in_compound_format_to_basic({Type, [Val]}) when is_integer(Type) or is_float(Type) or is_atom(Type) or is_boolean(Type) ->
+	Val;
+convert_value_in_compound_format_to_basic({variable, Val}) ->
+	{variable, Val};
+convert_value_in_compound_format_to_basic({List_type, Values}) when (List_type == ungen_list) ->
+	convert_values_in_compound_format_to_basic(Values);
+convert_value_in_compound_format_to_basic({tuple, Values}) ->
+	Tuple_elems_list = convert_values_in_compound_format_to_basic(Values),
+	list_to_tuple(Tuple_elems_list).
+
+%--------------------------Looking for actual clauses-----
+find_actual_clauses(Mod_name, Fun_name, Arity, Actual_params) ->
+	Fun_node = get_fun_node(Mod_name, Fun_name, Arity),
+	Fun_def = get_fundef(Fun_node),
+	Clauses = get_clauses(Fun_def),
+	Patterns = [get_patterns(Clause) || Clause <- Clauses],
+
+	case Actual_params of
+		[] -> 	Fun_def = Fun_def,
+				[Clause] = get_clauses(Fun_def),
+				[{Clause, []}];
+		_  ->   find_actual_clause(Patterns, Actual_params)   
+	end.
+
+find_actual_clause([], _) -> [];
+find_actual_clause([Pat | Pats], Pars) ->
+	Res = compare_terms(Pat, Pars),
+
+	case Res of 
+		true     -> [Clause] = ?Query:exec(hd(Pat), ?Expr:clause()),
+				    [{Clause, Pat}];
+		possibly -> [Clause] = ?Query:exec(hd(Pat), ?Expr:clause()),
+				 	[{Clause, Pat} | find_actual_clause(Pats, Pars)];
+		false    -> find_actual_clause(Pats, Pars)
+	end.	
+
+compare_terms([], []) -> true;
+compare_terms([Pat | Pats], [Par | Pars]) ->
+	Param_type = ?Expr:type(Par),
+	Pat_type = ?Expr:type(Pat),
+
+	case {Param_type, Pat_type} of
+		{cons, cons}     -> case compare_cons(Pat, Par) of
+						   		true  -> compare_terms(Pats, Pars);
+						   		possibly -> compare_terms(Pats, Pars);
+								false -> false
+							end;
+		{tuple, tuple} -> case compare_tuples(Pat, Par) of
+						   		true  -> compare_terms(Pats, Pars);
+						   		possibly -> compare_terms(Pats, Pars);
+								false -> false
+							end;
+		{_, variable}    -> possibly;
+		{variable, _}    -> possibly;
+		_                -> case compare_simple_type(Pat, Par) of
+								true  -> compare_terms(Pats, Pars);
+								possibly -> compare_terms(Pats, Pars);
+								false -> false
+							end
+	end.
+
+compare_tuples(T1, T2) ->
+	Children1 = ?Query:exec(T1, ?Expr:children()),
+	Children2 = ?Query:exec(T2, ?Expr:children()),
+
+	if
+		length(Children1) == length(Children2) -> compare_terms(Children1, Children2);
+		true                                   -> false
+	end.
+
+compare_cons(Con1, Con2) ->
+	List_elems1 = construct_list_from_cons_expr(Con1, []),
+	List_elems2 = construct_list_from_cons_expr(Con2, []),
+
+	compare_lists_elems(List_elems1, List_elems2, true).
+
+compare_simple_type(Pat, Par) ->
+	?Expr:value(Pat) =:= ?Expr:value(Par).
+
+compare_lists_elems(_, _, false) ->
+	false;
+compare_lists_elems(L, L, Status) -> Status;
+compare_lists_elems([{'...', _Value}], _, _) ->
+	possibly;
+compare_lists_elems(_, [{'...', _Value}], _) ->
+	possibly;
+compare_lists_elems([], _L2, _) ->
+	false;
+compare_lists_elems(_L1, [], _) ->
+	false;
+compare_lists_elems([{variable, _} | T1], [_ | T2], _) ->
+	compare_lists_elems(T1, T2, possibly);
+compare_lists_elems([_ | T1], [{variable, _} | T2], _) ->
+	compare_lists_elems(T1, T2, possibly);
+compare_lists_elems([H1 | T1], [H2 | T2], Status) when erlang:is_list(H1) and erlang:is_list(H2) ->
+	Result = compare_lists_elems(H1, H2, Status),
+
+	case Result of
+		false -> false;
+		possibly -> compare_lists_elems(T1, T2, possibly);
+		true     -> compare_lists_elems(T1, T2, Status)
+	end;
+compare_lists_elems([H1 | T1], [H2 | T2], Status) when erlang:is_tuple(H1) and erlang:is_tuple(H2) ->
+	Tuple1 = erlang:tuple_to_list(H1),
+	Tuple2 = erlang:tuple_to_list(H2),
+	Result = compare_lists_elems(Tuple1, Tuple2, Status),
+
+	case Result of
+		false -> false;
+		possibly -> compare_lists_elems(T1, T2, possibly);
+		true     -> compare_lists_elems(T1, T2, Status)
+	end;
+compare_lists_elems([H1 | T1], [H2 | T2], Status) ->
+	case H1 == H2 of
+		true -> compare_lists_elems(T1, T2, Status);
+		false -> false
 	end.
