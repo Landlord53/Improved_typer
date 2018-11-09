@@ -113,16 +113,17 @@ infer_simple_type(Expr) ->
 	end.
 
 construct_and_convert_cons_to_cf(Cons_expr, Vars) ->
-	Lst = construct_list_from_cons_expr(Cons_expr, Vars),
-	{convert_value_in_basic_format_to_compound(Lst), Vars}.
+	{Lst, Upd_vars} = construct_list_from_cons_expr(Cons_expr, Vars),
+	erlang:display(Lst),
+	{convert_value_in_basic_format_to_compound(Lst), Upd_vars}.
 
 infer_cons_expr_type(Cons_expr, Vars) ->
 	{Lst_in_cf, Upd_vars} = construct_and_convert_cons_to_cf(Cons_expr, Vars),
 	{generalize_term(Lst_in_cf, []), Upd_vars}.
 
 construct_and_convert_tuple_to_cg(Tuple_expr, Vars) ->
-	Tuple = construct_tuple(Tuple_expr, Vars),
-	{convert_value_in_basic_format_to_compound(Tuple), Vars}.
+	{Tuple, Upd_vars} = construct_tuple(Tuple_expr, Vars),
+	{convert_value_in_basic_format_to_compound(Tuple), Upd_vars}.
 
 infer_tuple_expr_type(Tuple_expr, Vars) ->
 	{Tuple_in_cf, Upd_vars} = construct_and_convert_tuple_to_cg(Tuple_expr, Vars),
@@ -1069,28 +1070,41 @@ get_actual_params(Application) ->
 
 %----------------------------------Defining actual clauses-------------------------------------
 
-extract_expr_vals([], _) -> [];
+extract_expr_vals([], Vars) -> {[], Vars};
 extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Vars) ->
-	Left_cons_expr_list = extract_expr_val(Left_cons_expr, Vars),
-	Right_cons_expr_list = extract_expr_val(Right_cons_expr, Vars),
+	{Left_cons_expr_list, Upd_vars} = extract_expr_val(Left_cons_expr, Vars),
+	{Right_cons_expr_list, Upd_vars2} = extract_expr_val(Right_cons_expr, Upd_vars),
 
 	%erlang:display(Right_cons_expr_list),
 	%erlang:display(Left_cons_expr_list),
 
+	Cons = 
 	case Right_cons_expr_list of
 		{empty_list, []}    -> Left_cons_expr_list;
 		{variable, Value} -> Left_cons_expr_list ++ [{'...', [Value]}];
 		_             -> Left_cons_expr_list ++ Right_cons_expr_list
-	end;
-extract_expr_vals([H | T], Vars) ->
+	end,
 
-	case ?Expr:type(H) of 
-		cons -> [construct_list_from_cons_expr(H, Vars) | extract_expr_vals(T, Vars)];
-		list -> construct_list_from_list_expr(H, Vars) ++ extract_expr_vals(T, Vars);
-		tuple -> [construct_tuple(H, Vars) | extract_expr_vals(T, Vars)];
-		variable -> Var_name = ?Expr:value(H),
-		            [obtain_var_val(Var_name, Vars) | extract_expr_vals(T, Vars)];
-		_        -> [?Expr:value(H) | extract_expr_vals(T, Vars)] 		
+	{Cons, Upd_vars2};
+extract_expr_vals([Expr | Exprs], Vars) ->
+
+	case ?Expr:type(Expr) of 
+		cons -> {Cons, Upd_vars} = construct_list_from_cons_expr(Expr, Vars),
+				{Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars),
+				{[Cons | Vals], Upd_vars2};
+		list -> {Cons, Upd_vars} = construct_list_from_list_expr(Expr, Vars), 
+				{Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars),
+				{Cons ++ Vals, Upd_vars2};
+		tuple -> {Tuple, Upd_vars} = construct_tuple(Expr, Vars), 
+				 {Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars),
+				 {[Tuple | Vals], Upd_vars2};
+		variable -> Var_name = ?Expr:value(Expr),
+					Var = obtain_var_val(Var_name, Vars),
+					{Vals, Upd_vars2} = extract_expr_vals(Exprs, Vars),
+		            {[Var | Vals], Upd_vars2};
+		_        -> {Gen_expr_tp, Upd_vars} = infer_expr_inf(Expr, Vars), 
+					{Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars),
+					{[Gen_expr_tp | Vals], Upd_vars2}		
 	end.
 
 extract_expr_val(Expr, Vars) ->
@@ -1099,8 +1113,8 @@ extract_expr_val(Expr, Vars) ->
 		list     -> construct_list_from_list_expr(Expr, Vars);
 		tuple    -> construct_tuple(Expr, Vars);
 		variable -> Var_name = ?Expr:value(Expr),
-					obtain_var_val(Var_name, Vars);
-		_        -> ?Expr:value(Expr)
+					{obtain_var_val(Var_name, Vars), Vars};
+		_        -> infer_expr_inf(Expr, Vars)
 	end.
 
 obtain_var_val(Var_name, Vars) ->
@@ -1114,15 +1128,15 @@ obtain_var_val(Var_name, Vars) ->
 construct_tuple([], _Vars) -> [];
 construct_tuple(Tuple, Vars) ->
 	Children = ?Query:exec(Tuple, ?Expr:children()),
-	Tuple_elems_in_lst = extract_expr_vals(Children, Vars),
-	list_to_tuple(Tuple_elems_in_lst).
+	{Tuple_elems_in_lst, Upd_vars} = extract_expr_vals(Children, Vars),
+	{list_to_tuple(Tuple_elems_in_lst), Upd_vars}.
 
 
 construct_list_from_cons_expr(Cons, Vars) ->
 	Children = ?Query:exec(Cons, ?Expr:children()),
 
 	case length(Children) of
-		0 -> {empty_list, []};
+		0 -> {{empty_list, []}, Vars};
 		1 -> extract_expr_vals(Children, Vars);
 		2 -> [Left_cons_expr, Right_cons_expr] = Children,
 			 extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Vars)
@@ -1209,23 +1223,23 @@ test() ->
 	Test6 = infer_fun_type(unit_test, af4_2, 0, []),
 	erlang:display({test6, af4_2, Test6 == [{integer, [3]}]}),
 
-%	Test7 = infer_fun_type(unit_test, lfac_2, 0, []),
-%	erlang:display({test7, lfac_2, Test7 == [{any,[]}]}),
+	Test7 = infer_fun_type(unit_test, lfac_2, 0, []),
+	erlang:display({test7, lfac_2, Test7 == [{any,[]}]}),
 
-%	Test8 = infer_fun_type(unit_test, lfac2_2, 0, []),
-%	erlang:display({test8, lfac2_2, Test8 == [{atom,[ok]}]}),
+	Test8 = infer_fun_type(unit_test, lfac2_2, 0, []),
+	erlang:display({test8, lfac2_2, Test8 == [{atom,[ok]}]}),
 
-%	Test9 = infer_fun_type(unit_test, lfac3_3, 1, []),
-%	erlang:display({test9, lfac3_3, Test9 == [{atom,[ok]}]}),
+	Test9 = infer_fun_type(unit_test, lfac3_3, 1, []),
+	erlang:display({test9, lfac3_3, Test9 == [{atom,[ok]}]}),
 
-%	Test10 = infer_fun_type(unit_test, lfac4_4, 0, []),
-%	erlang:display({test10, lfac4_4, Test10 == [{atom,[ok]}]}),
+	Test10 = infer_fun_type(unit_test, lfac4_4, 0, []),
+	erlang:display({test10, lfac4_4, Test10 == [{atom,[ok]}]}),
 
-%	Test11 = infer_fun_type(unit_test, lfac5_5, 0, []),
-%	erlang:display({test11, lfac5_5, Test11 == [{atom,[ok]}]}),
+	Test11 = infer_fun_type(unit_test, lfac5_5, 0, []),
+	erlang:display({test11, lfac5_5, Test11 == [{atom,[ok]}]}),
 
-%	Test12 = infer_fun_type(unit_test, lfac7_7, 0, []),
-%	erlang:display({test12, lfac7_7, Test12 == [{atom,[ok]}]}),
+	Test12 = infer_fun_type(unit_test, lfac7_7, 0, []),
+	erlang:display({test12, lfac7_7, Test12 == [{atom,[ok]}]}),
 
 	Test13 = infer_fun_type(unit_test, ei1, 0, []),
 	erlang:display({test13, ei1, Test13 == [{nonempty_list,[{union,[{integer,[1]},{integer,[2]},{integer,[4]}]}]}]}),
