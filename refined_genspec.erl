@@ -116,8 +116,8 @@ infer_var_type(Var_expr, Vars) ->
 	Var = find_var_by_name(?Expr:value(Var_expr), Vars),	
 
 	case Var of 
-		[]                       -> {any, []};
-		[{_Var_name, {Tp, Val}}] -> {Tp, Val}
+		{variable}                         -> {any, []};
+		{_Var_name, [{Tp, Val}]} -> {Tp, Val}
 	end.
 
 infer_simple_type(Expr) ->
@@ -127,14 +127,16 @@ infer_simple_type(Expr) ->
 		_     -> {?Expr:type(Expr), [?Expr:value(Expr)]}
 	end.
 
-infer_cons_expr_type(Expr, Variables) ->
-	List_in_basic_form = construct_list_from_cons_expr(Expr, Variables),
-	convert_value_in_basic_format_to_compound(List_in_basic_form).
+infer_cons_expr_type(Cons_expr, Vars) ->
+	Lst = construct_list_from_cons_expr(Cons_expr, Vars),
+	Lst_in_cf = convert_value_in_basic_format_to_compound(Lst),
+	generalize_term(Lst_in_cf, []).
 
-infer_tuple_expr_type(Expr, Variables) ->
-	Tuple_elems_list = construct_tuple(Expr, Variables),
-	Tuple_in_basic_format = list_to_tuple(Tuple_elems_list),
-	convert_value_in_basic_format_to_compound(Tuple_in_basic_format).
+infer_tuple_expr_type(Tuple_expr, Vars) ->
+	Tuple = construct_tuple(Tuple_expr, Vars),
+	Tuple_in_cf = convert_value_in_basic_format_to_compound(Tuple),
+	generalize_term(Tuple_in_cf, []).
+
 
 infer_fun_app_type(Fun_app, Vars) ->
 	[Expr, Arg_list] = ?Query:exec(Fun_app, ?Expr:children()),
@@ -151,22 +153,27 @@ infer_fun_app_type(Fun_app, Vars) ->
 	end.
 
 find_var_by_name(Required_var_Name, Variables) ->
-	lists:filter(fun({Var_name, _}) -> Required_var_Name == Var_name end, Variables).
+	Res = lists:filter(fun({Var_name, _}) -> Required_var_Name == Var_name end, Variables),
+
+	case Res of
+		[]    -> {variable, [Required_var_Name]};
+		[Var] -> Var
+	end.
 
 is_bounded(Variable_name, Variables) ->
 	Variable = find_var_by_name(Variable_name, Variables),
 
 	case Variable of
-		[] -> false;
+		{variable, _Var_name} -> false;
 		_  -> true
 	end.
 
 infer_anonymus_function(Var_name, Arg_list_expr, Variables) ->
 	case find_var_by_name(Var_name, Variables) of
-		[]                          -> infer_anon_func_app_without_body(Arg_list_expr, Variables);
-		[{Var_name, {fun_expr, _}}] -> infer_anon_func_app(Var_name, Arg_list_expr, Variables);
-		[{Var_name, {implicit_fun, {{current_mod, Mod_name}, Fun_name, _Arity}}}] -> infer_internal_fun(Mod_name, Fun_name, Arg_list_expr, Variables);
-		[{Var_name, {implicit_fun, {{external_mod, Mod_name}, Fun_name, _Arity}}}] -> infer_external_fun(Mod_name, Fun_name, Arg_list_expr, Variables);
+		{variable, _Var_name}         -> infer_anon_func_app_without_body(Arg_list_expr, Variables);
+		{Var_name, [{fun_expr, _}]} -> infer_anon_func_app(Var_name, Arg_list_expr, Variables);
+		{Var_name, [{implicit_fun, {{current_mod, Mod_name}, Fun_name, _Arity}}]} -> infer_internal_fun(Mod_name, Fun_name, Arg_list_expr, Variables);
+		{Var_name, [{implicit_fun, {{external_mod, Mod_name}, Fun_name, _Arity}}]} -> infer_external_fun(Mod_name, Fun_name, Arg_list_expr, Variables);
 		_                           -> {none, []}
 	end.
 
@@ -180,7 +187,7 @@ infer_anon_func_app_without_body(Arg_lst_expr, _Vars) ->
 	{func, [Arg_lst, [any]]}.
 
 infer_anon_func_app(Var_name, Arg_lst_expr, Vars) ->
-	[{_Var_name, {fun_expr, Fun_expr}}] = find_var_by_name(Var_name, Vars),
+	{_Var_name, [{fun_expr, Fun_expr}]} = find_var_by_name(Var_name, Vars),
 	Arg_list_children = ?Query:exec(Arg_lst_expr, ?Expr:children()),
 	Fun = fun(Arg) -> {Tp, _} = infer_expr_inf(Arg, Vars),
 				      Tp 
@@ -245,7 +252,7 @@ replace_clauses_params_with_args([Pat | Pats], Args) ->
 replace_clause_params_with_args([], []) -> [];
 replace_clause_params_with_args([Par | Pars], [Arg | Args]) ->
 	case ?Expr:type(Par) of
-		variable -> [{?Expr:value(Par), Arg} | replace_clause_params_with_args(Pars, Args)];
+		variable -> [{?Expr:value(Par), [Arg]} | replace_clause_params_with_args(Pars, Args)];
 		_        -> replace_clause_params_with_args(Pars, Args)
 	end.
 
@@ -254,37 +261,56 @@ infer_parenthesis_inf(Expr, Vars) ->
 	infer_expr_inf(Child, Vars).
 
 infer_match_expr_inf(Expr, Vars) ->
-	[Leftside_expr, Rightside_expr] = get_children(Expr),
+	[Ls_expr, Rs_expr] = get_children(Expr),
 
-	case ?Expr:type(Leftside_expr) of
-		variable -> bound_a_single_var(Leftside_expr, Rightside_expr, Vars);
-		cons     -> bound_cons(Leftside_expr, Rightside_expr, Vars)
+	case ?Expr:type(Ls_expr) of
+		variable -> bound_a_single_var(Ls_expr, Rs_expr, Vars);
+		cons     -> bound_cons(Ls_expr, Rs_expr, Vars)
 	end.
 
 	%{?Expr:value(Leftside_expr), infer_expr_inf(Rightside_expr, Variables)}.
 
-bound_a_single_var(Leftside_expr, Rightside_expr, Vars) ->
-	Var_name = ?Expr:value(Leftside_expr),
+bound_a_single_var(Ls_expr, Rs_expr, Vars) ->
+	Var_name = ?Expr:value(Ls_expr),
 	Is_bounded = is_bounded(Var_name, Vars),
 
 	case Is_bounded of
-		true  -> infer_expr_inf(Leftside_expr, Vars);
-		false -> {Rightside_tp, Upd_vars} = infer_expr_inf(Rightside_expr, Vars),
-				 New_var_name = ?Expr:value(Leftside_expr), 
-				 New_var = {New_var_name, Rightside_tp},
-				 {New_var, [New_var | Upd_vars]}
+		true  -> infer_expr_inf(Ls_expr, Vars);
+		false -> {Rs_cons_tp, Upd_vars} = infer_expr_inf(Rs_expr, Vars),
+				 Gen_rs_cons_tp = generalize_term(Rs_cons_tp, []),
+				 New_var = {Var_name, [Gen_rs_cons_tp]},
+				 {Gen_rs_cons_tp, [New_var | Upd_vars]}
 	end.
 
-bound_cons(Leftside_expr, Rightside_expr, Vars) ->
-	{Leftside_cons, Upd_vars} = infer_expr_inf(Leftside_expr, Vars),
-	{Rightside_cons_expr, Upd_vars2} = infer_expr_inf(Rightside_expr, Upd_vars),
-	Gen_rightside_cons = generalize_term(Rightside_cons_expr, []).
+bound_cons(Ls_expr, Rs_expr, Vars) ->
+	{Ls_cons_tp, Upd_vars} = infer_expr_inf(Ls_expr, Vars),
+	{Rs_cons_tp, Upd_vars2} = infer_expr_inf(Rs_expr, Upd_vars),
+	Gen_rs_cons_tp = generalize_term(Rs_cons_tp, []),
+	%erlang:display(Gen_rs_cons_tp),
+	bound_cons_vars(Ls_cons_tp, Gen_rs_cons_tp, Upd_vars2).
 
-%bound_cons_vars({ungen_list, [{variable, [Var_name]} | T]}, Gen_rightside_cons, Vars) ->
-%	case is_bounded(Var_name, Vars) of
-%		true  -> bound_cons_vars({ungen_list, T}, Gen_rightside_cons, Vars);
-%		false -> {Type, Elems} = Gen_rightside_cons,
-%		         bound_cons_vars({ungen_list, T}, Gen_rightside_cons, )
+bound_cons_vars({_Lst_tp, []}, Gen_rs_cons_tp, Vars) ->
+	{Gen_rs_cons_tp, Vars};
+bound_cons_vars({Lst_tp, [{variable, [Var_name]} | T]}, Gen_rs_cons_tp, Vars) ->
+	case is_bounded(Var_name, Vars) of
+		true  -> bound_cons_vars({ungen_list, T}, Gen_rs_cons_tp, Vars);
+		false -> New_var = bound_cons_var({Lst_tp, [{variable, [Var_name]}]}, Gen_rs_cons_tp),
+		         bound_cons_vars({Lst_tp, T}, Gen_rs_cons_tp, [New_var | Vars])
+	end;
+bound_cons_vars(Rs_cons = {Lst_tp, [{'...', [Var_name]}]}, Gen_rs_cons_tp, Vars) ->
+	case is_bounded(Var_name, Vars) of
+		true  -> {Gen_rs_cons_tp, Vars};
+		false -> New_var = bound_cons_var(Rs_cons, Gen_rs_cons_tp),
+		         {Gen_rs_cons_tp, [New_var | Vars]}
+	end;
+bound_cons_vars({Lst_tp, [_Elem | T]}, Gen_rs_cons_tp, Vars) ->
+	bound_cons_vars({Lst_tp, T}, Gen_rs_cons_tp, Vars).
+
+bound_cons_var({ungen_list, [{'...', [Var_name]}]}, {Rightside_lst_tp, [Proper_part, Improp_part]}) ->
+	{Var_name, [Improp_part]};
+bound_cons_var({ungen_list, [{variable, [Var_name]}]}, {Rightside_lst_tp, [Proper_part]}) ->
+	{Var_name, [Proper_part]}.
+
 
 
 
@@ -300,6 +326,8 @@ generalize_elems([Elem | Elems], Elems_tbl) ->
 
 generalize_term(Term, []) ->
 generalize_term(Term, ?ELEMS_TBL);
+generalize_term({Tp, Elem_val}, Elems_tbl) when (Tp == fun_expr) or (Tp == implicit_fun) ->
+	{Tp, Elem_val};
 generalize_term({union, Elem_val}, Elems_tbl) ->
 	Upd_elems_tbl = upd_elems_tbl_with_new_elems(Elem_val, Elems_tbl),
 	convert_elems_tbl_to_internal_format(Upd_elems_tbl, []);
@@ -1077,7 +1105,11 @@ convert_value_in_basic_format_to_compound({Tp, Val}) when (Tp == empty_list) or 
 														   or (Tp == nonempty_maybe_improper_list) or (Tp == list)
 														   or (Tp == undef_maybe_improper_list) or (Tp == ungen_improper_list)
 														   or (Tp == undef_nonempty_maybe_improper_list)
-														   or (Tp == tuple) or (Tp == union) -> 
+														   or (Tp == tuple) or (Tp == union) or (Tp == atom)
+														   or (Tp == boolean) or (Tp == union)
+														   or (Tp == neg_integer) or (Tp == pos_integer)
+														   or (Tp == non_neg_integer) or (Tp == integer)
+														   or (Tp == float) or (Tp == number) or (Tp == any) -> 
 	{Tp, Val};
 convert_value_in_basic_format_to_compound({'...', Val}) -> 
 	{'...', Val};
@@ -1251,9 +1283,9 @@ compare_lists_elems([H1 | T1], [H2 | T2], Status) ->
 	end.
 
 extract_expr_vals([], _) -> [];
-extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Variables) ->
-	Left_cons_expr_list = extract_expr_val(Left_cons_expr, Variables),
-	Right_cons_expr_list = extract_expr_val(Right_cons_expr, Variables),
+extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Vars) ->
+	Left_cons_expr_list = extract_expr_val(Left_cons_expr, Vars),
+	Right_cons_expr_list = extract_expr_val(Right_cons_expr, Vars),
 
 	%erlang:display(Right_cons_expr_list),
 	%erlang:display(Left_cons_expr_list),
@@ -1263,53 +1295,56 @@ extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Variables)
 		{variable, [Value]} -> Left_cons_expr_list ++ [{'...', [Value]}];
 		_             -> Left_cons_expr_list ++ Right_cons_expr_list
 	end;
-extract_expr_vals([H | T], Variables) ->
+extract_expr_vals([H | T], Vars) ->
 
 	case ?Expr:type(H) of 
-		cons -> [construct_list_from_cons_expr(H, Variables) | extract_expr_vals(T, Variables)];
-		list -> construct_list_from_list_expr(H, Variables) ++ extract_expr_vals(T, Variables);
-		tuple -> [construct_tuple(H, Variables) | extract_expr_vals(T, Variables)];
-		variable -> [define_var_value(H, Variables) | extract_expr_vals(T, Variables)];
-		_        -> [?Expr:value(H) | extract_expr_vals(T, Variables)] 		
+		cons -> [construct_list_from_cons_expr(H, Vars) | extract_expr_vals(T, Vars)];
+		list -> construct_list_from_list_expr(H, Vars) ++ extract_expr_vals(T, Vars);
+		tuple -> [construct_tuple(H, Vars) | extract_expr_vals(T, Vars)];
+		variable -> Var_name = ?Expr:value(H),
+		            [obtain_var_val(Var_name, Vars) | extract_expr_vals(T, Vars)];
+		_        -> [?Expr:value(H) | extract_expr_vals(T, Vars)] 		
 	end.
 
-extract_expr_val(Expr, Variables) ->
+extract_expr_val(Expr, Vars) ->
 	case ?Expr:type(Expr) of
-		cons     -> construct_list_from_cons_expr(Expr, Variables);
-		list     -> construct_list_from_list_expr(Expr, Variables);
-		tuple    -> construct_tuple(Expr, Variables);
-		variable -> define_var_value(Expr, Variables);
+		cons     -> construct_list_from_cons_expr(Expr, Vars);
+		list     -> construct_list_from_list_expr(Expr, Vars);
+		tuple    -> construct_tuple(Expr, Vars);
+		variable -> Var_name = ?Expr:value(Expr),
+					obtain_var_val(Var_name, Vars);
 		_        -> ?Expr:value(Expr)
 	end.
 
-define_var_value(Var_expr, Variables) ->
-	Var_name = ?Expr:value(Var_expr),
-	Variable = find_var_by_name(Var_name, Variables),
+obtain_var_val(Var_name, Vars) ->
+	Var = find_var_by_name(Var_name, Vars),
 
-	case Variable of
-		[] -> {variable, [Var_name]};
-		[{Var_name, Type}] -> convert_value_in_compound_format_to_basic(Type)
+	case Var of
+		{variable, [Var_name]} -> {variable, Var_name};
+		{Var_name, [Value]}  -> Value
 	end.
 
-construct_tuple([], Variables) -> [];
-construct_tuple(Tuple, Variables) ->
+construct_tuple([], Vars) -> [];
+construct_tuple(Tuple, Vars) ->
 	Children = ?Query:exec(Tuple, ?Expr:children()),
-	extract_expr_vals(Children, Variables).
+	Tuple_elems_in_lst = extract_expr_vals(Children, Vars),
+	list_to_tuple(Tuple_elems_in_lst).
 
-construct_list_from_cons_expr(Cons, Variables) ->
+
+construct_list_from_cons_expr(Cons, Vars) ->
 	Children = ?Query:exec(Cons, ?Expr:children()),
 
 	case length(Children) of
 		0 -> {empty_list, []};
-		1 -> extract_expr_vals(Children, Variables);
+		1 -> extract_expr_vals(Children, Vars);
 		2 -> [Left_cons_expr, Right_cons_expr] = Children,
-			 extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Variables)
+			 extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Vars)
 	end.
 
-construct_list_from_list_expr([], Variables) -> [];
-construct_list_from_list_expr(L, Variables) ->
+construct_list_from_list_expr([], Vars) -> [];
+construct_list_from_list_expr(L, Vars) ->
 	Children = ?Query:exec(L, ?Expr:children()),
-	extract_expr_vals(Children, Variables).
+	extract_expr_vals(Children, Vars).
 
 %--------------------Extraction of a function specification from the typer result--------------------------------------
 extract_matches([]) -> [];
@@ -1387,41 +1422,41 @@ test() ->
 	Test6 = infer_fun_type(unit_test, af4_2, 0, []),
 	erlang:display({test6, af4_2, Test6 == [{integer, [3]}]}),
 
-	Test7 = infer_fun_type(unit_test, lfac_2, 0, []),
-	erlang:display({test7, lfac_2, Test7 == [{any,[]}]}),
+%	Test7 = infer_fun_type(unit_test, lfac_2, 0, []),
+%	erlang:display({test7, lfac_2, Test7 == [{any,[]}]}),
 
-	Test8 = infer_fun_type(unit_test, lfac2_2, 0, []),
-	erlang:display({test8, lfac2_2, Test8 == [{atom,[ok]}]}),
+%	Test8 = infer_fun_type(unit_test, lfac2_2, 0, []),
+%	erlang:display({test8, lfac2_2, Test8 == [{atom,[ok]}]}),
 
-	Test9 = infer_fun_type(unit_test, lfac3_3, 1, []),
-	erlang:display({test9, lfac3_3, Test9 == [{atom,[ok]}]}),
+%	Test9 = infer_fun_type(unit_test, lfac3_3, 1, []),
+%	erlang:display({test9, lfac3_3, Test9 == [{atom,[ok]}]}),
 
-	Test10 = infer_fun_type(unit_test, lfac4_4, 0, []),
-	erlang:display({test10, lfac4_4, Test10 == [{atom,[ok]}]}),
+%	Test10 = infer_fun_type(unit_test, lfac4_4, 0, []),
+%	erlang:display({test10, lfac4_4, Test10 == [{atom,[ok]}]}),
 
-	Test11 = infer_fun_type(unit_test, lfac5_5, 0, []),
-	erlang:display({test11, lfac5_5, Test11 == [{atom,[ok]}]}),
+%	Test11 = infer_fun_type(unit_test, lfac5_5, 0, []),
+%	erlang:display({test11, lfac5_5, Test11 == [{atom,[ok]}]}),
 
-	Test12 = infer_fun_type(unit_test, lfac7_7, 0, []),
-	erlang:display({test12, lfac7_7, Test12 == [{atom,[ok]}]}),
+%	Test12 = infer_fun_type(unit_test, lfac7_7, 0, []),
+%	erlang:display({test12, lfac7_7, Test12 == [{atom,[ok]}]}),
 
 	Test13 = infer_fun_type(unit_test, ei1, 0, []),
-	erlang:display({test13, ei1, Test13 == [{ungen_list,[{integer,[1]},{integer,[2]},{integer,[4]}]}]}),
+	erlang:display({test13, ei1, Test13 == [{nonempty_list,[{union,[{integer,[1]},{integer,[2]},{integer,[4]}]}]}]}),
 
 	Test14 = infer_fun_type(unit_test, ei2, 0, []),
-	erlang:display({test14, ei2, Test14 == [{ungen_list,[{integer,[1]},{integer,[2]},{ungen_list,[{integer,[1]},{integer,[2]},{integer,[3]}]}]}]}),
+	erlang:display({test14, ei2, Test14 == [{nonempty_list,[{union,[{integer,[1]},{integer,[2]},{nonempty_list,[{union,[{integer,[1]},{integer,[2]},{integer,[3]}]}]}]}]}]}),
 
 	Test15 = infer_fun_type(unit_test, ei3, 0, []),
-	erlang:display({test15, ei3, Test15 == [{ungen_tuple,[{ungen_list,[{integer,[1]},{integer,[2]}]},{ungen_list,[{integer,[3]},{integer,[4]}]}]}]}),
+	erlang:display({test15, ei3, Test15 == [{tuple,[{nonempty_list,[{union,[{integer,[1]},{integer,[2]}]}]},{nonempty_list,[{union,[{integer,[3]},{integer,[4]}]}]}]}]}),
 
 	Test16 = infer_fun_type(unit_test, ei4, 0, []),
-	erlang:display({test16, ei4, Test16 == [{ungen_list,[{integer,[1]},{integer,[1]},{integer,[2]}]}]}),
+	erlang:display({test16, ei4, Test16 == [{nonempty_list,[{union,[{integer,[1]},{integer,[2]}]}]}]}),
 
 	Test17 = infer_fun_type(unit_test, ei5, 0, []),
-	erlang:display({test17, ei5, Test17 == [{ungen_improper_list,[{integer,[1]}|{integer,[2]}]}]}),
+	erlang:display({test17, ei5, Test17 == [{nonempty_improper_list,[{integer,[1]},{integer,[2]}]}]}),
 
 	Test18 = infer_fun_type(unit_test, ei6, 1, []),
-	erlang:display({test18, ei6, Test18 == [{ungen_list,[{integer,[1]}, {integer,[2]}, {integer,[3]}, {'...', ["A"]}]}]}),
+	erlang:display({test18, ei6, Test18 == [{undef_nonempty_maybe_improper_list,[]}]}),
 
 	%Test19 = infer_fun_type(unit_test, pm, 0, []),
 	%erlang:display({test19, pm, Test19 == [{integer,[3]}]}),
