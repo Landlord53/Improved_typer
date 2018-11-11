@@ -40,7 +40,7 @@ sum(A, B) ->
 
 %Looking for actual claueses
 
-lfac([H | T]) ->
+lfac([H | _T]) ->
 	H.
 
 lfac_2() ->
@@ -118,3 +118,46 @@ pm2() ->
 	A = 5,
 	[A | B] = [5, 1, 2],
 	B.	
+
+%Cons bounding 
+
+cons_bound(A) ->
+	[B, 1, 2] = A,
+	B.
+
+cons_bound2(A) ->
+	B = [A],
+	[C, 1, 2] = B,
+	C.
+
+cons_bound3(A) ->
+	B = A + 2,
+	C = [[B], 1, 2],
+	[[D], 1, 2] = C,
+	D.
+
+cons_bound4() -> 
+	B = [[2],1 | 3],
+	[[C], 1 | 3] = B,
+	C.
+
+cons_bound5() -> 
+	B = [[[87]], 3,4],
+	[[[C]], 3, 4] = B,
+	C.
+
+cons_bound6() -> 
+	A = [1,2 | 3],
+	[1,2 | B] = A,
+	B.
+
+cons_bound7() -> 
+	A = [1,2, 3],
+	[1,2 | B] = A,
+	B.
+
+cons_bound8() -> 
+	A = [1,2 | 3],
+	[B,2 | 3] = A,
+	B.
+

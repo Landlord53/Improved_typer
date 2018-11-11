@@ -286,8 +286,8 @@ find_lst_among_elems([]) -> [];
 find_lst_among_elems([{union, Elems} | T]) ->
 	find_lst_among_elems(Elems);
 find_lst_among_elems([{Elem_tp, Elem_val} | _Elems]) when (Elem_tp == empty_list) or (Elem_tp == nonempty_list)
-                                                     or (Elem_tp == nonempty_improper_list) or (Elem_tp == maybe_improper_list)
-                                                     or (Elem_tp == nonempty_maybe_improper_list) or (Elem_tp == list) ->                                                 
+                                                       or (Elem_tp == nonempty_improper_list) or (Elem_tp == maybe_improper_list)
+                                                       or (Elem_tp == nonempty_maybe_improper_list) or (Elem_tp == list) ->                                                 
     {Elem_tp, Elem_val};
 find_lst_among_elems([_Elem | Elems]) ->
 	find_lst_among_elems(Elems).
@@ -303,22 +303,21 @@ bound_cons_vars({_Lst_tp, []}, {empty_list, []}, Vars) ->
 bound_cons_vars({_Lst_tp, []}, Rs_cons_tp, Vars) ->
 	{Rs_cons_tp, Vars};
 bound_cons_vars(_Ls_cons, {any, []}, Vars) ->
-	{{any, []}, Vars};
+	{{nonempty_list, [{any, []}]}, Vars};
 bound_cons_vars(_Ls_cons, Rs_lst = {_Rs_lst_tp, [{any, []}]}, Vars) ->
 	{Rs_lst, Vars};
 bound_cons_vars({Lst_tp, [{ungen_list, Ls_lst_Elems} | T]}, {Rs_lst_tp, Rs_lst_elems}, Vars) ->
     Rs_elem_lst = find_lst_among_elems(Rs_lst_elems),
-    erlang:display(Rs_elem_lst),
     {_Elem_tp, Upd_vars} = bound_cons_vars({ungen_list, Ls_lst_Elems}, Rs_elem_lst, Vars),
     bound_cons_vars({Lst_tp, T}, {Rs_lst_tp, Rs_lst_elems}, Upd_vars);                                                                        
 bound_cons_vars({Lst_tp, [{variable, [Var_name]} | T]}, Rs_cons_tp, Vars) ->
-	case is_bounded([Var_name], Vars) of
+	case is_bounded(Var_name, Vars) of
 		true  -> bound_cons_vars({Lst_tp, T}, Rs_cons_tp, Vars);
 		false -> New_var = bound_cons_var({Lst_tp, [{variable, [Var_name]}]}, Rs_cons_tp),
 		         bound_cons_vars({Lst_tp, T}, Rs_cons_tp, [New_var | Vars])
 	end;
 bound_cons_vars(Rs_cons = {_Lst_tp, [{'...', [Var_name]}]}, Rs_cons_tp, Vars) ->
-	case is_bounded([Var_name], Vars) of
+	case is_bounded(Var_name, Vars) of
 		true  -> {Rs_cons_tp, Vars};
 		false -> New_var = bound_cons_var(Rs_cons, Rs_cons_tp),
 		         {Rs_cons_tp, [New_var | Vars]}
@@ -330,14 +329,14 @@ bound_cons_vars({Lst_tp, [_Elem | T]}, Rs_cons_tp, Vars) ->
 
 
 bound_cons_var({ungen_list, [{'...', [Var_name]}]}, Rs_cons = {_Rs_lst_tp, [_Proper_part, Improp_part]}) ->
-	{[Var_name], [{union, [Rs_cons, Improp_part]}]};
+	{Var_name, [{union, [Rs_cons, Improp_part]}]};
 bound_cons_var({ungen_list, [{'...', [Var_name]}]}, {Rs_lst_tp, [Proper_part]}) ->
 	Upd_lst_tp = generalize_lst_tp(Rs_lst_tp, empty_list),
-	{[Var_name], [{Upd_lst_tp, [Proper_part]}]};
+	{Var_name, [{Upd_lst_tp, [Proper_part]}]};
 bound_cons_var({ungen_list, [{variable, [Var_name]}]}, {_Rs_lst_tp, [Proper_part, _Improp_part]}) ->
-	{[Var_name], [Proper_part]};
+	{Var_name, [Proper_part]};
 bound_cons_var({ungen_list, [{variable, [Var_name]}]}, {_Rs_lst_tp, [Proper_part]}) ->
-	{[Var_name], [Proper_part]}.
+	{Var_name, [Proper_part]}.
 
 
 
@@ -1086,7 +1085,7 @@ extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Vars) ->
 	Cons = 
 	case Right_cons_expr_list of
 		{empty_list, []}    -> Left_cons_expr_list;
-		{variable, Value} -> Left_cons_expr_list ++ [{'...', [Value]}];
+		{variable, Value} -> Left_cons_expr_list ++ [{'...', Value}];
 		_             -> Left_cons_expr_list ++ Right_cons_expr_list
 	end,
 
@@ -1126,7 +1125,7 @@ obtain_var_val(Var_name, Vars) ->
 	Var = find_var_by_name(Var_name, Vars),
 
 	case Var of
-		{variable, [Var_name]} -> {variable, Var_name};
+		{variable, [Var_name]} -> {variable, [Var_name]};
 		{Var_name, [Value]}  -> Value
 	end.
 
@@ -1689,11 +1688,39 @@ test() ->
 									         [{tuple,
 									              [{union,[{integer,[1]},{integer,[3]},{atom,[ok]}]},
 									               {union,[{integer,[2]},{integer,[4]},{atom,[error]}]}]},
-									          {tuple,[{integer,[5]},{integer,[6]},{integer,[7]}]}]}]}}).
+									          {tuple,[{integer,[5]},{integer,[6]},{integer,[7]}]}]}]}}),
 
-%	A62 = c([1,2 | {3,4}]),
-%	Test62 = g(B62),
-%	erlang:display({test62, Test62 ==
+	Test65 = infer_fun_type(unit_test, cons_bound, 1, []),
+	erlang:display({test65, cons_bound, Test65 == [{any, []}]}),
+
+	Test66 = infer_fun_type(unit_test, cons_bound2, 1, []),
+	erlang:display({test66, cons_bound2, Test66 == [{any, []}]}),
+
+	Test67 = infer_fun_type(unit_test, cons_bound3, 1, []),
+	erlang:display({test67, cons_bound3, Test67 == [{number, []}]}),
+
+	Test68 = infer_fun_type(unit_test, cons_bound4, 0, []),
+	erlang:display({test68, cons_bound4, Test68 == [{integer, [2]}]}),
+
+	Test69 = infer_fun_type(unit_test, cons_bound5, 0, []),
+	erlang:display({test69, cons_bound5, Test69 == [{integer, [87]}]}),
+
+	Test70 = infer_fun_type(unit_test, cons_bound6, 0, []),
+	erlang:display({test70, cons_bound6, Test70 == [{union,
+												     [{nonempty_improper_list,
+												          [{union,[{integer,[1]},{integer,[2]}]},{integer,[3]}]},
+												      {integer,[3]}]}]}),
+
+	Test71 = infer_fun_type(unit_test, cons_bound7, 0, []),
+	erlang:display({test71, cons_bound7, Test71 == [{list,[{union,[{integer,[1]},
+										                {integer,[2]},
+										                {integer,[3]}]}]}]}),
+
+	Test72 = infer_fun_type(unit_test, cons_bound8, 0, []),
+	erlang:display({test72, cons_bound8, Test72 == [{union,[{integer,[1]},{integer,[2]}]}]}).
+
+
+
 
 g(List) -> 
 	{Res, _} = generalize_lst(List, ?ELEMS_TBL),
