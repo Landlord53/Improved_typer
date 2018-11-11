@@ -39,6 +39,12 @@
 		{any, []}, {bools, []}, {nums, []}, {atoms, []}, {lists, []}, {tuples, []}, {improper_elems, []}
 	}).
 
+-define(LIST_TYPES, [
+		empty_list, nonempty_list, improper_list, 
+		nonempty_improper_list, maybe_improper_list, 
+		nonempty_maybe_improper_list, list
+	]).
+
 infer_fun_type(Mod_name, Fun_name, Arity, Variables) ->
 	Fun_node = get_fun_node(Mod_name, Fun_name, Arity),
 	Fun_def = get_fundef(Fun_node),
@@ -276,6 +282,17 @@ bound_a_single_var(Ls_expr, Rs_expr, Vars) ->
 				 {Rs_cons_tp, [New_var | Upd_vars]}
 	end.
 
+find_lst_among_elems([]) -> [];
+find_lst_among_elems([{union, Elems} | T]) ->
+	find_lst_among_elems(Elems);
+find_lst_among_elems([{Elem_tp, Elem_val} | _Elems]) when (Elem_tp == empty_list) or (Elem_tp == nonempty_list)
+                                                     or (Elem_tp == nonempty_improper_list) or (Elem_tp == maybe_improper_list)
+                                                     or (Elem_tp == nonempty_maybe_improper_list) or (Elem_tp == list) ->                                                 
+    {Elem_tp, Elem_val};
+find_lst_among_elems([_Elem | Elems]) ->
+	find_lst_among_elems(Elems).
+
+
 bound_cons(Ls_expr, Rs_expr, Vars) ->
 	{Ls_cons_tp, Upd_vars} = construct_and_convert_cons_to_cf(Ls_expr, Vars),
 	{Rs_cons_tp, Upd_vars2} = infer_expr_inf(Rs_expr, Upd_vars),
@@ -287,19 +304,22 @@ bound_cons_vars({_Lst_tp, []}, Rs_cons_tp, Vars) ->
 	{Rs_cons_tp, Vars};
 bound_cons_vars(_Ls_cons, {any, []}, Vars) ->
 	{{any, []}, Vars};
-bound_cons_vars(_Ls_cons, {_Rs_lst_tp, [{any, []}]}, Vars) ->
-	{{any, []}, Vars};
-%bound_cons_vars({Lst_tp, [{Elem_lst_tp, Elems} | T]}, Rs_cons_tp, Vars) when (Elem_lst_tp == ungen_list) 
-%                                                                          or (Elem_lst_tp == ungen_improper_list) ->
-%    Elems_tbl = upd_elems_tbl_with_new_elem()                                                                     
+bound_cons_vars(_Ls_cons, Rs_lst = {_Rs_lst_tp, [{any, []}]}, Vars) ->
+	{Rs_lst, Vars};
+bound_cons_vars({Lst_tp, [{Elem_lst_tp, Ls_lst_Elems} | T]}, {Rs_lst_tp, Rs_lst_elems}, Vars) when (Elem_lst_tp == ungen_list) 
+                                                                                                or (Elem_lst_tp == ungen_improper_list) ->
+    Rs_elem_lst = find_lst_among_elems(Rs_lst_elems),
+    erlang:display(Rs_lst_elems),
+    {_Elem_tp, Upd_vars} = bound_cons_vars({Elem_lst_tp, Ls_lst_Elems}, Rs_elem_lst, Vars),
+    bound_cons_vars({Lst_tp, T}, {Rs_lst_tp, Rs_lst_elems}, Upd_vars);                                                                        
 bound_cons_vars({Lst_tp, [{variable, [Var_name]} | T]}, Rs_cons_tp, Vars) ->
-	case is_bounded(Var_name, Vars) of
+	case is_bounded([Var_name], Vars) of
 		true  -> bound_cons_vars({Lst_tp, T}, Rs_cons_tp, Vars);
 		false -> New_var = bound_cons_var({Lst_tp, [{variable, [Var_name]}]}, Rs_cons_tp),
 		         bound_cons_vars({Lst_tp, T}, Rs_cons_tp, [New_var | Vars])
 	end;
 bound_cons_vars(Rs_cons = {_Lst_tp, [{'...', [Var_name]}]}, Rs_cons_tp, Vars) ->
-	case is_bounded(Var_name, Vars) of
+	case is_bounded([Var_name], Vars) of
 		true  -> {Rs_cons_tp, Vars};
 		false -> New_var = bound_cons_var(Rs_cons, Rs_cons_tp),
 		         {Rs_cons_tp, [New_var | Vars]}
@@ -309,14 +329,14 @@ bound_cons_vars({Lst_tp, [_Elem | T]}, Rs_cons_tp, Vars) ->
 
 
 bound_cons_var({ungen_list, [{'...', [Var_name]}]}, Rs_cons = {_Rs_lst_tp, [_Proper_part, Improp_part]}) ->
-	{Var_name, [{union, [Rs_cons, Improp_part]}]};
+	{[Var_name], [{union, [Rs_cons, Improp_part]}]};
 bound_cons_var({ungen_list, [{'...', [Var_name]}]}, {Rs_lst_tp, [Proper_part]}) ->
 	Upd_lst_tp = generalize_lst_tp(Rs_lst_tp, empty_list),
-	{Var_name, [{Upd_lst_tp, [Proper_part]}]};
+	{[Var_name], [{Upd_lst_tp, [Proper_part]}]};
 bound_cons_var({ungen_list, [{variable, [Var_name]}]}, {_Rs_lst_tp, [Proper_part, _Improp_part]}) ->
-	{Var_name, [Proper_part]};
+	{[Var_name], [Proper_part]};
 bound_cons_var({ungen_list, [{variable, [Var_name]}]}, {_Rs_lst_tp, [Proper_part]}) ->
-	{Var_name, [Proper_part]}.
+	{[Var_name], [Proper_part]}.
 
 
 
