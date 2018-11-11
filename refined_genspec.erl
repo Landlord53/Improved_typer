@@ -114,7 +114,6 @@ infer_simple_type(Expr) ->
 
 construct_and_convert_cons_to_cf(Cons_expr, Vars) ->
 	{Lst, Upd_vars} = construct_list_from_cons_expr(Cons_expr, Vars),
-	erlang:display(Lst),
 	{convert_value_in_basic_format_to_compound(Lst), Upd_vars}.
 
 infer_cons_expr_type(Cons_expr, Vars) ->
@@ -284,6 +283,16 @@ bound_cons(Ls_expr, Rs_expr, Vars) ->
 
 bound_cons_vars({_Lst_tp, []}, Rs_cons_tp, Vars) ->
 	{Rs_cons_tp, Vars};
+bound_cons_vars({_Lst_tp, []}, {empty_list, []}, Vars) ->
+	{{empty_list, []}, Vars};
+bound_cons_vars(_Ls_cons, {any, []}, Vars) ->
+	{{any, []}, Vars};
+bound_cons_vars(_Ls_cons, {Rs_lst_tp, []}, Vars) when (Rs_lst_tp == undef_maybe_improper_list) or
+                                                      (Rs_lst_tp == undef_nonempty_maybe_improper_list) ->
+	{{any, []}, Vars};
+%bound_cons_vars({Lst_tp, [{Elem_lst_tp, Elems} | T]}, Rs_cons_tp, Vars) when (Elem_lst_tp == ungen_list) 
+%                                                                         or (Elem_lst_tp == ungen_improper_list) ->
+%    Elems_tbl = upd_elems_tbl_with_new_elem()                                                                     
 bound_cons_vars({Lst_tp, [{variable, [Var_name]} | T]}, Rs_cons_tp, Vars) ->
 	case is_bounded(Var_name, Vars) of
 		true  -> bound_cons_vars({Lst_tp, T}, Rs_cons_tp, Vars);
@@ -299,8 +308,14 @@ bound_cons_vars(Rs_cons = {_Lst_tp, [{'...', [Var_name]}]}, Rs_cons_tp, Vars) ->
 bound_cons_vars({Lst_tp, [_Elem | T]}, Rs_cons_tp, Vars) ->
 	bound_cons_vars({Lst_tp, T}, Rs_cons_tp, Vars).
 
-bound_cons_var({ungen_list, [{'...', [Var_name]}]}, {_Rs_lst_tp, [_Proper_part, Improp_part]}) ->
-	{Var_name, [Improp_part]};
+
+bound_cons_var({ungen_list, [{'...', [Var_name]}]}, Rs_cons = {_Rs_lst_tp, [_Proper_part, Improp_part]}) ->
+	{Var_name, [{union, [Rs_cons, Improp_part]}]};
+bound_cons_var({ungen_list, [{'...', [Var_name]}]}, {Rs_lst_tp, [Proper_part]}) ->
+	Upd_lst_tp = generalize_lst_tp(Rs_lst_tp, empty_list),
+	{Var_name, [{Upd_lst_tp, [Proper_part]}]};
+bound_cons_var({ungen_list, [{variable, [Var_name]}]}, {_Rs_lst_tp, [Proper_part, Improp_part]}) ->
+	{Var_name, [Proper_part]};
 bound_cons_var({ungen_list, [{variable, [Var_name]}]}, {_Rs_lst_tp, [Proper_part]}) ->
 	{Var_name, [Proper_part]}.
 
@@ -1089,7 +1104,7 @@ extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Vars) ->
 extract_expr_vals([Expr | Exprs], Vars) ->
 
 	case ?Expr:type(Expr) of 
-		cons -> {Cons, Upd_vars} = construct_list_from_cons_expr(Expr, Vars),
+		cons   -> {Cons, Upd_vars} = construct_list_from_cons_expr(Expr, Vars),
 				{Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars),
 				{[Cons | Vals], Upd_vars2};
 		list -> {Cons, Upd_vars} = construct_list_from_list_expr(Expr, Vars), 
@@ -1098,7 +1113,7 @@ extract_expr_vals([Expr | Exprs], Vars) ->
 		tuple -> {Tuple, Upd_vars} = construct_tuple(Expr, Vars), 
 				 {Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars),
 				 {[Tuple | Vals], Upd_vars2};
-		variable -> Var_name = ?Expr:value(Expr),
+		variable  -> Var_name = ?Expr:value(Expr),
 					Var = obtain_var_val(Var_name, Vars),
 					{Vals, Upd_vars2} = extract_expr_vals(Exprs, Vars),
 		            {[Var | Vals], Upd_vars2};
