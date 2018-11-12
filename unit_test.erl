@@ -166,6 +166,11 @@ cons_bound9() ->
 	[{B, C, D}, 4,5] = A,
 	{B, C, D}.
 
+cons_bound10() -> 
+	A = [{1,2}, {3,4,5}, 6],
+	[{1,2}, {B, C, D}, 6] = A,
+	{B, C, D}.
+
 
 %Tuple bounding
 tuple_bound() -> 
@@ -188,6 +193,6 @@ tuple_bound4(R) ->
 	{{B,C}, 2, 3} = A,
 	{B, C}.
 
-match_expr() -> 
+match_expr(A) -> 
 	4 = A,
 	A.

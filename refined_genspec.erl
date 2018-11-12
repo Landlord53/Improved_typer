@@ -329,13 +329,16 @@ find_lst_among_elems([{Elem_tp, Elem_val} | _Elems]) when (Elem_tp == empty_list
 find_lst_among_elems([_Elem | Elems]) ->
 	find_lst_among_elems(Elems).
 
-find_tuple_among_elems([]) -> [];
-find_tuple_among_elems([{union, Elems} | _T]) ->
-	find_tuple_among_elems(Elems);
-find_tuple_among_elems([{Elem_tp, Elem_val} | _Elems]) when (Elem_tp == tuple) ->                                                 
-    {Elem_tp, Elem_val};
-find_tuple_among_elems([_Elem | Elems]) ->
-	find_tuple_among_elems(Elems).
+find_tuple_among_elems([], _Size) -> [];
+find_tuple_among_elems([{union, Elems} | _T], Size) ->
+	find_tuple_among_elems(Elems, Size);
+find_tuple_among_elems([{Elem_tp, Elem_val} | Elems], Size) when (Elem_tp == tuple) ->                                                 
+	case Size == length(Elem_val) of
+		true  -> {Elem_tp, Elem_val};
+		false -> find_tuple_among_elems(Elems, Size)
+	end;
+find_tuple_among_elems([_Elem | Elems], Size) ->
+	find_tuple_among_elems(Elems, Size).
 
 
 bound_cons(Ls_expr, Rs_expr, Vars) ->
@@ -353,7 +356,7 @@ bound_cons_vars(_Ls_cons, {any, []}, Vars) ->
 bound_cons_vars(_Ls_cons, Rs_lst = {_Rs_lst_tp, [{any, []}]}, Vars) ->
 	{Rs_lst, Vars};
 bound_cons_vars({Lst_tp, [{ungen_tuple, Ls_tuple_elems} | T]}, {Rs_lst_tp, Rs_lst_elems}, Vars) ->
-    Rs_tuple_elem = find_tuple_among_elems(Rs_lst_elems),
+    Rs_tuple_elem = find_tuple_among_elems(Rs_lst_elems, length(Ls_tuple_elems)),
     {_Elem_tp, Upd_vars} = bound_tuple_vars({ungen_tuple, Ls_tuple_elems}, Rs_tuple_elem, Rs_tuple_elem, Vars),
     bound_cons_vars({Lst_tp, T}, {Rs_lst_tp, Rs_lst_elems}, Upd_vars); 
 bound_cons_vars({Lst_tp, [{ungen_list, Ls_lst_elems} | T]}, {Rs_lst_tp, Rs_lst_elems}, Vars) ->
@@ -1787,8 +1790,11 @@ test() ->
 	Test76 = infer_fun_type(unit_test, tuple_bound4, 1, []),
 	erlang:display({test76, tuple_bound4, Test76 == [{tuple,[{any,[]},{integer,[5]}]}]}),
 
-	Test78 = infer_fun_type(unit_test, match_expr, 0, []),
-	erlang:display({test78, match_expr, Test78 == [{integer,[4]}]}).
+	Test78 = infer_fun_type(unit_test, match_expr, 1, []),
+	erlang:display({test78, match_expr, Test78 == [{integer,[4]}]}),
+
+	Test79 = infer_fun_type(unit_test, cons_bound10, 0, []),
+	erlang:display({test79, cons_bound10, Test79 == [{tuple,[{integer,[3]},{integer,[4]},{integer,[5]}]}]}).
 
 
 
