@@ -187,3 +187,7 @@ tuple_bound4(R) ->
 	A = {{R,5},2,3},
 	{{B,C}, 2, 3} = A,
 	{B, C}.
+
+match_expr() -> 
+	4 = A,
+	A.

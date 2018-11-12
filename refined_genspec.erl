@@ -266,12 +266,22 @@ infer_match_expr_inf(Expr, Vars) ->
 	[Ls_expr, Rs_expr] = get_children(Expr),
 
 	case ?Expr:type(Ls_expr) of
-		variable -> bound_a_single_var(Ls_expr, Rs_expr, Vars);
-		cons     -> bound_cons(Ls_expr, Rs_expr, Vars);
-		tuple    -> bound_tuple(Ls_expr, Rs_expr, Vars)
+		variable   -> bound_a_single_var(Ls_expr, Rs_expr, Vars);
+		cons       -> bound_cons(Ls_expr, Rs_expr, Vars);
+		tuple      -> bound_tuple(Ls_expr, Rs_expr, Vars);
+		_Simple_tp -> match_simple_tp(Ls_expr, Rs_expr, Vars)
 	end.
 
-
+match_simple_tp(Ls_expr, Rs_expr, Vars) ->
+	case ?Expr:type(Rs_expr) of
+		variable -> {Ls_expr_tp, Upd_vars} = infer_expr_inf(Ls_expr, Vars),
+					New_var = {?Expr:value(Rs_expr), [Ls_expr_tp]},
+					{Ls_expr_tp, [New_var | Upd_vars]};
+		_        -> {Ls_expr_tp, Upd_vars} = infer_expr_inf(Ls_expr, Vars),
+					{_Rs_expr_tp, Upd_vars2} = infer_expr_inf(Rs_expr, Upd_vars),
+					{Ls_expr_tp, Upd_vars2}
+	end.
+		           
 bound_tuple(Ls_tuple, Rs_tuple, Vars) ->
 	{Ls_tuple_tp, Upd_vars} = construct_and_convert_tuple_to_cf(Ls_tuple, Vars),
 	{Rs_tuple_gen_tp, Upd_vars2} = infer_expr_inf(Rs_tuple, Upd_vars),
@@ -1775,7 +1785,10 @@ test() ->
 	erlang:display({test75, tuple_bound3, Test75 == [{tuple,[{integer,[4]},{integer,[5]}]}]}),
 
 	Test76 = infer_fun_type(unit_test, tuple_bound4, 1, []),
-	erlang:display({test76, tuple_bound4, Test76 == [{tuple,[{any,[]},{integer,[5]}]}]}).
+	erlang:display({test76, tuple_bound4, Test76 == [{tuple,[{any,[]},{integer,[5]}]}]}),
+
+	Test78 = infer_fun_type(unit_test, match_expr, 0, []),
+	erlang:display({test78, match_expr, Test78 == [{integer,[4]}]}).
 
 
 
