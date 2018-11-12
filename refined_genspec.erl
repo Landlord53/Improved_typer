@@ -39,7 +39,7 @@
 	}).
 
 -define(LIST_TYPES, [
-		empty_list, nonempty_list, improper_list, 
+		empty_list, nonempty_list,  
 		nonempty_improper_list, maybe_improper_list, 
 		nonempty_maybe_improper_list, list
 	]).
@@ -288,7 +288,6 @@ bound_tuple(Ls_tuple, Rs_tuple, Vars) ->
 	bound_tuple_vars(Ls_tuple_tp, Rs_tuple_gen_tp, Rs_tuple_gen_tp, Upd_vars2).
 
 
-
 bound_tuple_vars({ungen_tuple, []}, {tuple, []}, Match_expr_tp, Vars) ->
 	{Match_expr_tp, Vars};
 bound_tuple_vars(_Ls_tuple, {any, []}, _Match_expr_tp, Vars) ->
@@ -419,7 +418,7 @@ generalize_term({Elem_tp, Elem_val}, _Elems_tbl) when (Elem_tp == neg_integer) o
 generalize_term({Elem_tp, Elem_val}, _Elems_tbl) when (Elem_tp == atom) ->
 	{Elem_tp, Elem_val};
 generalize_term({Elem_tp, Elem_val}, Elems_tbl) when (Elem_tp == empty_list) or (Elem_tp == ungen_list)
-												              or (Elem_tp == nonempty_list) or (Elem_tp == improper_list)
+												              or (Elem_tp == nonempty_list)
 												              or (Elem_tp == nonempty_improper_list) or (Elem_tp == maybe_improper_list)
 												              or (Elem_tp == nonempty_maybe_improper_list) or (Elem_tp == list) ->
 	{Gen_lst, _} = generalize_lst({Elem_tp, Elem_val}, Elems_tbl),
@@ -450,7 +449,8 @@ convert_elems_tbl_to_internal_format([{lists, [{Lst_tp, Elems_tbl}]} | T], Res) 
 convert_elems_tbl_to_internal_format([{_Label, Tp} | T], Res) ->
 	convert_elems_tbl_to_internal_format(T, [Tp | Res]).
 
-
+upd_elems_tbl_with_new_elem({variable, _Var_name}, Elems_tbl) ->
+	set_elems_tbl_to_any(Elems_tbl);
 upd_elems_tbl_with_new_elem({any, []}, Elems_tbl) ->
 	set_elems_tbl_to_any(Elems_tbl);
 upd_elems_tbl_with_new_elem({union, Elem_val}, Elems_tbl) ->
@@ -464,7 +464,7 @@ upd_elems_tbl_with_new_elem({Elem_tp, Elem_val}, Elems_tbl) when (Elem_tp == neg
 upd_elems_tbl_with_new_elem({Elem_tp, Elem_val}, Elems_tbl) when (Elem_tp == atom) ->
 	upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?ATOMS_SEC_INDEX);
 upd_elems_tbl_with_new_elem({Elem_tp, Elem_val}, Elems_tbl) when (Elem_tp == empty_list) or (Elem_tp == ungen_list)
-												              or (Elem_tp == nonempty_list) or (Elem_tp == improper_list)
+												              or (Elem_tp == nonempty_list)
 												              or (Elem_tp == nonempty_improper_list) or (Elem_tp == maybe_improper_list)
 												              or (Elem_tp == nonempty_maybe_improper_list) or (Elem_tp == list) ->
 	upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?LISTS_SEC_INDEX);
@@ -557,7 +557,7 @@ upd_tuple_sec({Tp, Val}, Sec) ->
 	end.
 
 
-upd_lst_sec({Tp, Val}, Sec) when (Tp == nonempty_list) or (Tp == improper_list)
+upd_lst_sec({Tp, Val}, Sec) when (Tp == nonempty_list)
 						      or (Tp == nonempty_improper_list) or (Tp == maybe_improper_list)
 						      or (Tp == nonempty_maybe_improper_list) or (Tp == list) ->
 	upd_lst_sec_with_gen_lst({Tp, Val}, Sec);
@@ -591,7 +591,7 @@ generalize_lst({_Lst_tp, {ungen_list, Elems}}, Elems_tbl) ->
 	Elems_tbl_secs = tuple_to_list(Upd_elems_tbl),
 	Gen_lst = build_lst(Upd_lst_tp, Elems_tbl_secs, []),
 	{Gen_lst, Upd_elems_tbl};
-generalize_lst({_Lst_tp, {Tp, Elems}}, Elems_tbl) when (Tp == nonempty_list) or (Tp == improper_list)
+generalize_lst({_Lst_tp, {Tp, Elems}}, Elems_tbl) when (Tp == nonempty_list)
 												    or (Tp == nonempty_improper_list) or (Tp == maybe_improper_list)
 												    or (Tp == nonempty_maybe_improper_list) or (Tp == list) ->
     Lst_sec = {lists, [{undef_list, Elems_tbl}]},
@@ -648,12 +648,12 @@ generalize_lst({Lst_tp, [{Elem_tp, Elem_val} | T]}, Elems_tbl) when Elem_tp == a
 	Upd_elems_tbl = upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?ATOMS_SEC_INDEX),
 	generalize_lst({Lst_tp, T}, Upd_elems_tbl);
 generalize_lst({Lst_tp, [{Elem_tp, Elem_val} | T]}, Elems_tbl) when (Elem_tp == empty_list) or (Elem_tp == ungen_list)
-															      or (Elem_tp == nonempty_list) or (Elem_tp == improper_list)
+															      or (Elem_tp == nonempty_list)
 															      or (Elem_tp == nonempty_improper_list) or (Elem_tp == maybe_improper_list)
 																  or (Elem_tp == nonempty_maybe_improper_list) or (Elem_tp == list) ->																  														   
 	Upd_elems_tbl = upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?LISTS_SEC_INDEX),
 	generalize_lst({Lst_tp, T}, Upd_elems_tbl);
-generalize_lst(Lst = {Lst_tp, _Elems}, _Elems_tbl) when (Lst_tp == nonempty_list) or (Lst_tp == improper_list)
+generalize_lst(Lst = {Lst_tp, _Elems}, _Elems_tbl) when (Lst_tp == nonempty_list)
 											         or (Lst_tp == nonempty_improper_list) or (Lst_tp == maybe_improper_list)
 											         or (Lst_tp == nonempty_maybe_improper_list) or (Lst_tp == list) ->
 	Lst_sec = {lists, [{Lst_tp, ?ELEMS_TBL}]},																   
@@ -840,24 +840,20 @@ build_lst(Lst_tp, [{_Label, Tp} | T], Res) ->
 
 generalize_lst_tp(Lst_tp, Lst_tp) ->
 	Lst_tp;
-generalize_lst_tp(_Lst1, list) ->
-	list;
-generalize_lst_tp(list, _Lst2) ->
-	list;
 generalize_lst_tp(undef_list, Lst2) ->
 	Lst2;
 generalize_lst_tp(Lst1, undef_list) ->
 	Lst1;
-generalize_lst_tp(undef_nonempty_maybe_improper_list, _) ->
-	undef_nonempty_maybe_improper_list;
-generalize_lst_tp(_, undef_nonempty_maybe_improper_list) ->
-	undef_nonempty_maybe_improper_list;
 generalize_lst_tp(maybe_improper_list, Lst2) when (Lst2 == nonempty_list) or (Lst2 == nonempty_improper_list) 
-                                               or (Lst2 == nonempty_maybe_improper_list) ->
+                                               or (Lst2 == nonempty_maybe_improper_list) or (Lst2 == list) ->
 	maybe_improper_list;
 generalize_lst_tp(Lst1, maybe_improper_list) when (Lst1 == nonempty_list) or (Lst1 == nonempty_improper_list) 
-                                               or (Lst1 == nonempty_maybe_improper_list)->
+                                               or (Lst1 == nonempty_maybe_improper_list) or (Lst1 == list) ->
 	maybe_improper_list;
+generalize_lst_tp(list, nonempty_improper_list) ->
+	 maybe_improper_list;
+generalize_lst_tp(nonempty_improper_list, list) ->
+	 maybe_improper_list;
 generalize_lst_tp(empty_list, nonempty_maybe_improper_list) ->
 	maybe_improper_list;
 generalize_lst_tp(nonempty_maybe_improper_list, empty_list) ->
@@ -870,16 +866,16 @@ generalize_lst_tp(nonempty_improper_list, empty_list) ->
 	maybe_improper_list;
 generalize_lst_tp(empty_list, nonempty_improper_list) ->
 	maybe_improper_list;
-generalize_lst_tp(nonempty_maybe_improper_list, Lst2) when (Lst2 == nonempty_list) or (Lst2 == nonempty_improper_list) ->
+generalize_lst_tp(nonempty_maybe_improper_list, Lst2) when (Lst2 == nonempty_list) or (Lst2 == nonempty_improper_list)
+                                                        or (Lst2 == list) ->
 	nonempty_maybe_improper_list;
-generalize_lst_tp(Lst1, nonempty_maybe_improper_list) when (Lst1 == nonempty_list) or (Lst1 == nonempty_improper_list) ->
+generalize_lst_tp(Lst1, nonempty_maybe_improper_list) when (Lst1 == nonempty_list) or (Lst1 == nonempty_improper_list)
+                                                        or (Lst1 == list) ->
 	nonempty_maybe_improper_list;
 generalize_lst_tp(nonempty_improper_list, nonempty_list) ->
 	nonempty_maybe_improper_list;	
 generalize_lst_tp(nonempty_list, nonempty_improper_list) ->
 	nonempty_maybe_improper_list.
-
-
 
 
 infer_infix_expr_type(Expr, Operation, Vars) ->
@@ -1063,7 +1059,7 @@ convert_tuple_elems_in_basic_format_to_compound([H | T]) ->
 convert_value_in_basic_format_to_compound([]) -> 
 	{empty_list, []};
 convert_value_in_basic_format_to_compound({Tp, Val}) when (Tp == empty_list) or (Tp == ungen_list)
-														   or (Tp == nonempty_list) or (Tp == improper_list)
+														   or (Tp == nonempty_list)
 														   or (Tp == nonempty_improper_list) or (Tp == maybe_improper_list)
 														   or (Tp == nonempty_maybe_improper_list) or (Tp == list)
 														   or (Tp == tuple) or (Tp == union) or (Tp == atom)
@@ -1127,14 +1123,194 @@ get_actual_params(Application) ->
 	?Query:exec(Args_list, ?Expr:children()).	
 
 %----------------------------------Defining actual clauses-------------------------------------
+find_actual_clauses(Mod_name, Fun_name, Arity, Actual_params) ->
+	Fun_node = get_fun_node(Mod_name, Fun_name, Arity),
+	Fun_def = get_fundef(Fun_node),
+	Clauses = get_clauses(Fun_def),
+	Patterns = [get_patterns(Clause) || Clause <- Clauses],
+
+	case Actual_params of
+		[] -> 	Fun_def = Fun_def,
+				[Clause] = get_clauses(Fun_def),
+				[{Clause, []}];
+		_  ->   find_actual_clause(Patterns, Actual_params)   
+	end.
+
+find_actual_clause([], _) -> [];
+find_actual_clause([Pat | Pats], Pars) ->
+	Res = compare_terms(Pat, Pars),
+
+	case Res of 
+		true     -> [Clause] = 
+		?Query:exec(hd(Pat), ?Expr:clause()),
+				    [{Clause, Pat}];
+		possibly -> [Clause] = ?Query:exec(hd(Pat), ?Expr:clause()),
+				 	[{Clause, Pat} | find_actual_clause(Pats, Pars)];
+		false    -> find_actual_clause(Pats, Pars)
+	end.
+
+is_union_match({union, []}, _Elem2) ->
+	false;
+is_union_match({union, [Elem1 | Elems]}, Elem2) ->
+	Is_matching = are_matching_types(Elem1, Elem2),
+
+	case Is_matching of
+		false       -> is_union_match({union, Elems}, Elem2);
+		Is_matching -> Is_matching
+	end.
+
+is_ls_union_match_to_rs_union({union, []}, _Union2, Status) ->
+	Status;
+is_ls_union_match_to_rs_union({union, [Elem1 | Elems1]}, {union, Elems2}, Status) ->
+	Is_match = is_union_match({union, Elems2}, Elem1),
+
+	case Is_match of
+		false    -> false;
+		possibly -> is_ls_union_match_to_rs_union({union, Elems1}, {union, Elems2}, possibly);
+		true     -> is_ls_union_match_to_rs_union({union, Elems1}, {union, Elems2}, Status)
+	end. 
+
+are_matching_unions(Union1, Union2) ->
+	Are_ls_union_match = is_ls_union_match_to_rs_union(Union1, Union2, true),
+
+	case Are_ls_union_match of
+		false -> false;
+		_     -> is_ls_union_match_to_rs_union(Union2, Union1, Are_ls_union_match)
+	end.
+	
+
+are_matching_types(Type, Type) ->
+	true;
+
+are_matching_types({any, []}, _Type2) ->
+	possibly;
+are_matching_types(_Type1, {any, []}) ->
+	possibly;
+
+are_matching_types({union, Elems1}, {union, Elems2}) ->
+	are_matching_unions({union, Elems1}, {union, Elems2});
+are_matching_types({union, Elems1}, Elem2) ->
+	is_union_match({union, Elems1}, Elem2);
+are_matching_types(Elem1, {union, Elems2}) ->
+	is_union_match({union, Elems2}, Elem1);
+
+are_matching_types({number, _Val1}, {Type2, _Val2}) when (Type2 == neg_integer) or (Type2 == pos_integer) 
+												      or (Type2 == non_neg_integer) or (Type2 == integer) 
+												      or (Type2 == float) or (Type2 == number) ->
+	possibly;
+are_matching_types({Tp1, _Val1}, {number, _Val2}) when (Tp1 == neg_integer) or (Tp1 == pos_integer) 
+													or (Tp1 == non_neg_integer) or (Tp1 == integer) 
+													or (Tp1 == float) or (Tp1 == number) ->
+	possibly;
+
+are_matching_types({_Type1, [Value]}, {_Type2, [Value]}) when is_number(Value) ->
+	true;
+
+are_matching_types({neg_integer, [_Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == integer) ->
+	possibly;
+are_matching_types({pos_integer, [_Value]}, {Type2, []}) when (Type2 == pos_integer) or (Type2 == non_neg_integer) 
+														   or (Type2 == integer) ->
+	possibly;
+are_matching_types({non_neg_integer, [_Value]}, {Type2, []}) when (Type2 == non_neg_integer) or (Type2 == integer) ->
+	possibly;
+are_matching_types({integer, [_Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == pos_integer) 
+                                                       or (Type2 == non_neg_integer) or (Type2 == integer) ->
+	possibly;
+
+are_matching_types({Type1, []}, {neg_integer, [_Value]}) when (Type1 == neg_integer) or (Type1 == integer) ->
+	possibly;
+are_matching_types({Type1, []}, {pos_integer, [_Value]}) when (Type1 == pos_integer) or (Type1 == non_neg_integer) 
+                                                           or (Type1 == integer) ->
+	possibly;
+are_matching_types({Type1, []}, {non_neg_integer, [_Value]}) when (Type1 == non_neg_integer) or (Type1 == integer) ->
+	possibly;
+are_matching_types({Type1, []}, {integer, [_Value]}) when (Type1 == neg_integer) or (Type1 == pos_integer) 
+                                                       or (Type1 == non_neg_integer) or (Type1 == integer) ->
+	possibly;
+
+are_matching_types({neg_integer, [_Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == integer) ->
+	possibly;
+are_matching_types({pos_integer, [_Value]}, {Type2, []}) when (Type2 == pos_integer) or (Type2 == non_neg_integer) 
+                                                           or (Type2 == integer) ->
+	possibly;
+are_matching_types({non_neg_integer, [_Value]}, {Type2, []}) when (Type2 == non_neg_integer) or (Type2 == integer) ->
+	possibly;
+are_matching_types({integer, [_Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == pos_integer) 
+                                                       or (Type2 == non_neg_integer) or (Type2 == integer) ->
+	possibly;	
+are_matching_types({Type, [Value1]}, {Type, [Value2]}) when (Value1 == Value2) ->
+	true;
+are_matching_types({Type, [_Value]}, {Type, []}) when (Type == float) or (Type == atom) 
+                                                   or (Type == boolean) or (Type == fun_expr) 
+                                                   or (Type == implicit_fun) ->
+	possibly;
+are_matching_types({Type, []}, {Type, [_Value]}) when (Type == float) or (Type == atom) 
+                                                   or (Type == boolean) or (Type == fun_expr) 
+                                                   or (Type == implicit_fun)->
+	possibly;
+are_matching_types({Type, []}, {Type, []}) when (Type == float) or (Type == atom) 
+                                             or (Type == boolean) or (Type == fun_expr) 
+                                             or (Type == implicit_fun)->
+	possibly;
+are_matching_types({variable, _Value}, _Type2) ->
+	possibly;
+are_matching_types(_Type1, {variable, _Value}) ->
+	possibly;
+
+are_matching_types({Lst_tp1, Elems1}, {Lst_tp2, Elems2}) when ((Lst_tp1 == nonempty_list)
+                                                           or (Lst_tp1 == nonempty_improper_list) or (Lst_tp1 == maybe_improper_list)
+                                                           or (Lst_tp1 == nonempty_maybe_improper_list) or (Lst_tp1 == list))
+                                                          and ((Lst_tp2 == nonempty_list)
+                                                           or (Lst_tp2 == nonempty_improper_list) or (Lst_tp2 == maybe_improper_list)
+                                                           or (Lst_tp2 == nonempty_maybe_improper_list) or (Lst_tp2 == list)) ->
+	are_matching_lists({Lst_tp1, Elems1}, {Lst_tp2, Elems2});
+are_matching_types({tuple, Elems1}, {tuple, Elems2}) ->
+	case length(Elems1) == length(Elems2) of
+		true  -> are_matching_tuples({tuple, Elems1}, {tuple, Elems2}, true);
+		false -> false
+	end;  
+are_matching_types(_Tp1, _Tp2) ->
+	false.
+
+
+are_matching_tuples({tuple, []}, {tuple, []}, Status) ->
+	Status;
+are_matching_tuples({tuple, [Elem1 | Elems1]}, {tuple, [Elem2 | Elems2]}, Status) ->
+	Are_matching_elems = are_matching_types(Elem1, Elem2),
+
+	case Are_matching_elems of
+		false -> false;
+		possibly -> are_matching_tuples({tuple, Elems1}, {tuple, Elems2}, possibly);
+		true     -> are_matching_tuples({tuple, Elems1}, {tuple, Elems2}, Status)
+	end. 
+
+
+are_matching_lists({_Lst_tp1, [{any, []}]}, _Lst2) ->
+    possibly;
+are_matching_lists(_Lst1, {_Lst_tp2, [{any, []}]}) ->
+    possibly;
+are_matching_lists({Lst_tp1, _Elems1}, {nonempty_improper_list, _Elems2}) when (Lst_tp1 == nonempty_list) or (Lst_tp1 == list) ->
+	false;
+are_matching_lists({nonempty_improper_list, _Elems1}, {Lst_tp2, _Elems2}) when (Lst_tp2 == nonempty_list) or (Lst_tp2 == list) ->
+	false;	
+are_matching_lists({_Lst_tp1, [Prop_part1, Improp_part1]}, {_Lst_tp2, [Prop_part2, Improp_part2]}) ->
+    Prop_parts_match = are_matching_types(Prop_part1, Prop_part2),
+    Improp_parts_match = are_matching_types(Improp_part1, Improp_part2),
+
+    case {Prop_parts_match, Improp_parts_match} of
+    	{false, _}   -> false;
+    	{_, false}   -> false;
+    	{true, true} -> true;
+    	_Other       -> possibly
+    end;          
+are_matching_lists({_Lst_tp1, [Elems1]}, {_Lst_tp2, [Elems2]}) ->
+    are_matching_types(Elems1, Elems2).
+
 
 extract_expr_vals([], Vars) -> {[], Vars};
 extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Vars) ->
 	{Left_cons_expr_list, Upd_vars} = extract_expr_val(Left_cons_expr, Vars),
 	{Right_cons_expr_list, Upd_vars2} = extract_expr_val(Right_cons_expr, Upd_vars),
-
-	%erlang:display(Right_cons_expr_list),
-	%erlang:display(Left_cons_expr_list),
 
 	Cons = 
 	case Right_cons_expr_list of
@@ -1148,14 +1324,14 @@ extract_expr_vals([Expr | Exprs], Vars) ->
 
 	case ?Expr:type(Expr) of 
 		cons   -> {Cons, Upd_vars} = construct_list_from_cons_expr(Expr, Vars),
-				{Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars),
-				{[Cons | Vals], Upd_vars2};
-		list -> {Cons, Upd_vars} = construct_list_from_list_expr(Expr, Vars), 
-				{Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars),
-				{Cons ++ Vals, Upd_vars2};
-		tuple -> {Tuple, Upd_vars} = construct_tuple(Expr, Vars), 
-				 {Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars),
-				 {[Tuple | Vals], Upd_vars2};
+				  {Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars),
+				  {[Cons | Vals], Upd_vars2};
+		list   -> {Cons, Upd_vars} = construct_list_from_list_expr(Expr, Vars), 
+				  {Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars),
+				  {Cons ++ Vals, Upd_vars2};
+		tuple  -> {Tuple, Upd_vars} = construct_tuple(Expr, Vars), 
+				  {Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars),
+				  {[Tuple | Vals], Upd_vars2};
 		variable  -> Var_name = ?Expr:value(Expr),
 					Var = obtain_var_val(Var_name, Vars),
 					{Vals, Upd_vars2} = extract_expr_vals(Exprs, Vars),
@@ -1809,10 +1985,21 @@ g(List) ->
 c(Value) ->
 	convert_value_in_basic_format_to_compound(Value).
 
-u(Elems) ->
-	{_, A} = c(Elems),
-	{Res, _} = generalize_elems(A, []),
+u([Elem | Elems]) ->
+	{_lst_tp, Elems_in_cf} = c([Elem | Elems]),
+	{Res, _} = generalize_elems(Elems_in_cf, []),
+	Res;
+u(Elem) ->
+	Elem_in_cf = c(Elem),
+	{Res, _} = generalize_elems([Elem_in_cf], []),
 	Res.
+
+m(A, B) ->
+	A_in_cf = u(A),
+	B_in_cf = u(B),
+	%erlang:display(A_in_cf),
+	%erlang:display(B_in_cf),
+	are_matching_types(A_in_cf, B_in_cf).
 
 t(Tuple) ->
 	A = c(Tuple),
@@ -1882,79 +2069,23 @@ define_simple_type(A) ->
 	end.
 
 %-----------------Код ненужный на данный момент-------------
-are_matching_types(Type, Type) ->
-	true;
-
-are_matching_types({any, _Val1}, _Type2) ->
-	true;
-are_matching_types(_Type1, {any, _Val2}) ->
-	true;
-
-are_matching_types({number, _Val1}, {Type2, _Val2}) when ((Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) or (Type2 == float) or (Type2 == number)) ->
-	true;
-are_matching_types({Tp1, _Val1}, {number, _Val2}) when (Tp1 == neg_integer) or (Tp1 == pos_integer) or (Tp1 == non_neg_integer) or (Tp1 == integer) or (Tp1 == float) or (Tp1 == number) ->
-	true;
-
-are_matching_types({_Type1, [Value]}, {_Type2, [Value]}) when is_number(Value) ->
-	true;
-
-are_matching_types({neg_integer, [_Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == integer) ->
-	true;
-are_matching_types({pos_integer, [_Value]}, {Type2, []}) when (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
-	true;
-are_matching_types({non_neg_integer, [_Value]}, {Type2, []}) when (Type2 == non_neg_integer) or (Type2 == integer) ->
-	true;
-are_matching_types({integer, [_Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
-	true;
-
-are_matching_types({Type1, []}, {neg_integer, [_Value]}) when (Type1 == neg_integer) or (Type1 == integer) ->
-	true;
-are_matching_types({Type1, []}, {pos_integer, [_Value]}) when (Type1 == pos_integer) or (Type1 == non_neg_integer) or (Type1 == integer) ->
-	true;
-are_matching_types({Type1, []}, {non_neg_integer, [_Value]}) when (Type1 == non_neg_integer) or (Type1 == integer) ->
-	true;
-are_matching_types({Type1, []}, {integer, [_Value]}) when (Type1 == neg_integer) or (Type1 == pos_integer) or (Type1 == non_neg_integer) or (Type1 == integer) ->
-	true;
-
-are_matching_types({neg_integer, [_Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == integer) ->
-	true;
-are_matching_types({pos_integer, [_Value]}, {Type2, []}) when (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
-	true;
-are_matching_types({non_neg_integer, [_Value]}, {Type2, []}) when (Type2 == non_neg_integer) or (Type2 == integer) ->
-	true;
-are_matching_types({integer, [_Value]}, {Type2, []}) when (Type2 == neg_integer) or (Type2 == pos_integer) or (Type2 == non_neg_integer) or (Type2 == integer) ->
-	true;	
 
 
-are_matching_types({Type, [Value1]}, {Type, [Value2]}) when Value1 == Value2 ->
-	true;
-are_matching_types({Type, [_Value]}, {Type, []}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun) ->
-	true;
-are_matching_types({Type, []}, {Type, [_Value]}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun)->
-	true;
-are_matching_types({Type, []}, {Type, []}) when (Type == float) or (Type == atom) or (Type == boolean) or (Type == fun_expr) or (Type == implicit_fun)->
-	true;
+%are_matching_types({Type1, Vals1}, {Type2, Vals2}) when ((Type1 == defined_list) or (Type1 == list) or (Type1 == nonempty_list) or (Type1 == improper_list)) and
+%														((Type2 == defined_list) or (Type2 == list) or (Type2 == nonempty_list) or (Type2 == improper_list)) ->
+%	are_matching_lists({Type1, Vals1}, {Type2, Vals2});
 
-are_matching_types({variable, _Value}, _Type2) ->
-	true;
-are_matching_types(_Type1, {variable, _Value}) ->
-	true;
+%are_matching_types(_Type1, _Type2) ->
+%	false.
 
-are_matching_types({Type1, Vals1}, {Type2, Vals2}) when ((Type1 == defined_list) or (Type1 == list) or (Type1 == nonempty_list) or (Type1 == improper_list)) and
-														((Type2 == defined_list) or (Type2 == list) or (Type2 == nonempty_list) or (Type2 == improper_list)) ->
-	are_matching_lists({Type1, Vals1}, {Type2, Vals2});
-
-are_matching_types(_Type1, _Type2) ->
-	false.
-
-are_matching_lists(List, List) ->
-	true;
-are_matching_lists({empty_list, []}, {list, _Val}) ->
-	true;
-are_matching_lists({list, _Val}, {empty_list, []}) ->
-	true;
-are_matching_lists(List1, List2) ->
-	are_lists_elems_matching(List1, List2).
+%are_matching_lists(List, List) ->
+%	true;
+%are_matching_lists({empty_list, []}, {list, _Val}) ->
+%	true;
+%are_matching_lists({list, _Val}, {empty_list, []}) ->
+%	true;
+%are_matching_lists(List1, List2) ->
+%	are_lists_elems_matching(List1, List2).
 
 
 are_lists_elems_matching({_Type1, []}, {_Type2, []}) ->
@@ -2012,30 +2143,7 @@ convert_value_in_compound_format_to_basic({tuple, Values}) ->
 	list_to_tuple(Tuple_elems_list).
 
 %--------------------------Looking for actual clauses-----
-find_actual_clauses(Mod_name, Fun_name, Arity, Actual_params) ->
-	Fun_node = get_fun_node(Mod_name, Fun_name, Arity),
-	Fun_def = get_fundef(Fun_node),
-	Clauses = get_clauses(Fun_def),
-	Patterns = [get_patterns(Clause) || Clause <- Clauses],
-
-	case Actual_params of
-		[] -> 	Fun_def = Fun_def,
-				[Clause] = get_clauses(Fun_def),
-				[{Clause, []}];
-		_  ->   find_actual_clause(Patterns, Actual_params)   
-	end.
-
-find_actual_clause([], _) -> [];
-find_actual_clause([Pat | Pats], Pars) ->
-	Res = compare_terms(Pat, Pars),
-
-	case Res of 
-		true     -> [Clause] = ?Query:exec(hd(Pat), ?Expr:clause()),
-				    [{Clause, Pat}];
-		possibly -> [Clause] = ?Query:exec(hd(Pat), ?Expr:clause()),
-				 	[{Clause, Pat} | find_actual_clause(Pats, Pars)];
-		false    -> find_actual_clause(Pats, Pars)
-	end.	
+	
 
 compare_terms([], []) -> true;
 compare_terms([Pat | Pats], [Par | Pars]) ->
