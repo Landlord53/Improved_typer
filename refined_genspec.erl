@@ -11,7 +11,6 @@
 %8)Обрадотать случай, когда последнее выражение функции - funxepression.
 %10)Добавить обрабокту случая вызова функция внутри листво и таплов
 %11)Когда при присваивании на левой стороне стоит пременная с типом any а на правой переменная с каким-то более точным значением, присвоить переменной слева это значение
-%12)Улучшить обработку случая типа bound_cons_elems({List_type1, [{'...', [Value]} | Elems1]}, {list, [{'...', [Value]} | Elems2]}).Так как я не знаю тип элемента до {'...', [Value]} пришлось поставить просто any.
 %13)Добавить стринг
 %14)Добавить типы pos_integer, neg_integer, etc о время вычисления infix expressions и prefix expressions
 %15)Добавить обработку данного случая 
@@ -126,12 +125,12 @@ infer_cons_expr_type(Cons_expr, Vars) ->
 	{Lst_in_cf, Upd_vars} = construct_and_convert_cons_to_cf(Cons_expr, Vars),
 	{generalize_term(Lst_in_cf, []), Upd_vars}.
 
-construct_and_convert_tuple_to_cg(Tuple_expr, Vars) ->
+construct_and_convert_tuple_to_cf(Tuple_expr, Vars) ->
 	{Tuple, Upd_vars} = construct_tuple(Tuple_expr, Vars),
 	{convert_value_in_basic_format_to_compound(Tuple), Upd_vars}.
 
 infer_tuple_expr_type(Tuple_expr, Vars) ->
-	{Tuple_in_cf, Upd_vars} = construct_and_convert_tuple_to_cg(Tuple_expr, Vars),
+	{Tuple_in_cf, Upd_vars} = construct_and_convert_tuple_to_cf(Tuple_expr, Vars),
 	{generalize_term(Tuple_in_cf, []), Upd_vars}.
 
 
@@ -268,8 +267,36 @@ infer_match_expr_inf(Expr, Vars) ->
 
 	case ?Expr:type(Ls_expr) of
 		variable -> bound_a_single_var(Ls_expr, Rs_expr, Vars);
-		cons     -> bound_cons(Ls_expr, Rs_expr, Vars)
+		cons     -> bound_cons(Ls_expr, Rs_expr, Vars);
+		tuple    -> bound_tuple(Ls_expr, Rs_expr, Vars)
 	end.
+
+
+bound_tuple(Ls_tuple, Rs_tuple, Vars) ->
+	{Ls_tuple_tp, Upd_vars} = construct_and_convert_tuple_to_cf(Ls_tuple, Vars),
+	{Rs_tuple_gen_tp, Upd_vars2} = infer_expr_inf(Rs_tuple, Upd_vars),
+	bound_tuple_vars(Ls_tuple_tp, Rs_tuple_gen_tp, Rs_tuple_gen_tp, Upd_vars2).
+
+
+
+bound_tuple_vars({ungen_tuple, []}, {tuple, []}, Match_expr_tp, Vars) ->
+	{Match_expr_tp, Vars};
+bound_tuple_vars(_Ls_tuple, {any, []}, _Match_expr_tp, Vars) ->
+	{{any, []}, Vars};
+bound_tuple_vars({ungen_tuple, [{variable, [Var_name]} | Ls_elems]}, {tuple, [Rs_elem | Rs_elems]}, Match_expr_tp, Vars) ->
+	case is_bounded(Var_name, Vars) of
+		true  -> bound_tuple_vars({ungen_tuple, Ls_elems}, {tuple, Rs_elems}, Match_expr_tp, Vars);
+		false -> New_var = {Var_name, [Rs_elem]},
+		         bound_tuple_vars({ungen_tuple, Ls_elems}, {tuple, Rs_elems}, Match_expr_tp, [New_var | Vars])
+	end;
+bound_tuple_vars({ungen_tuple, [{ungen_list, Lst_elems} | Ls_elems]}, {tuple, [Rs_elem | Rs_elems]}, Match_expr_tp, Vars) -> 
+	{_Lst_tp, Upd_vars} = bound_cons_vars({ungen_list, Lst_elems}, Rs_elem, Vars),
+	bound_tuple_vars({ungen_tuple, Ls_elems}, {tuple, Rs_elems}, Match_expr_tp, Upd_vars);
+bound_tuple_vars({ungen_tuple, [{ungen_tuple, Tuple_elems} | Ls_elems]}, {tuple, [Rs_elem | Rs_elems]}, Match_expr_tp, Vars) -> 
+	{_Tuple, Upd_vars} = bound_tuple_vars({ungen_tuple, Tuple_elems}, Rs_elem, Rs_elem, Vars),
+	bound_tuple_vars({ungen_tuple, Ls_elems}, {tuple, Rs_elems}, Match_expr_tp, Upd_vars);
+bound_tuple_vars({ungen_tuple, [_Ls_elem | Ls_elems]}, {tuple, [_Rs_elem | Rs_elems]}, Match_expr_tp, Vars) ->
+	bound_tuple_vars({ungen_tuple, Ls_elems}, {tuple, Rs_elems}, Match_expr_tp, Vars).
 
 bound_a_single_var(Ls_expr, Rs_expr, Vars) ->
 	Var_name = ?Expr:value(Ls_expr),
@@ -283,7 +310,7 @@ bound_a_single_var(Ls_expr, Rs_expr, Vars) ->
 	end.
 
 find_lst_among_elems([]) -> [];
-find_lst_among_elems([{union, Elems} | T]) ->
+find_lst_among_elems([{union, Elems} | _T]) ->
 	find_lst_among_elems(Elems);
 find_lst_among_elems([{Elem_tp, Elem_val} | _Elems]) when (Elem_tp == empty_list) or (Elem_tp == nonempty_list)
                                                        or (Elem_tp == nonempty_improper_list) or (Elem_tp == maybe_improper_list)
@@ -292,11 +319,20 @@ find_lst_among_elems([{Elem_tp, Elem_val} | _Elems]) when (Elem_tp == empty_list
 find_lst_among_elems([_Elem | Elems]) ->
 	find_lst_among_elems(Elems).
 
+find_tuple_among_elems([]) -> [];
+find_tuple_among_elems([{union, Elems} | _T]) ->
+	find_tuple_among_elems(Elems);
+find_tuple_among_elems([{Elem_tp, Elem_val} | _Elems]) when (Elem_tp == tuple) ->                                                 
+    {Elem_tp, Elem_val};
+find_tuple_among_elems([_Elem | Elems]) ->
+	find_tuple_among_elems(Elems).
+
 
 bound_cons(Ls_expr, Rs_expr, Vars) ->
 	{Ls_cons_tp, Upd_vars} = construct_and_convert_cons_to_cf(Ls_expr, Vars),
 	{Rs_cons_tp, Upd_vars2} = infer_expr_inf(Rs_expr, Upd_vars),
 	bound_cons_vars(Ls_cons_tp, Rs_cons_tp, Upd_vars2).
+
 
 bound_cons_vars({_Lst_tp, []}, {empty_list, []}, Vars) ->
 	{{empty_list, []}, Vars};
@@ -306,9 +342,13 @@ bound_cons_vars(_Ls_cons, {any, []}, Vars) ->
 	{{nonempty_list, [{any, []}]}, Vars};
 bound_cons_vars(_Ls_cons, Rs_lst = {_Rs_lst_tp, [{any, []}]}, Vars) ->
 	{Rs_lst, Vars};
-bound_cons_vars({Lst_tp, [{ungen_list, Ls_lst_Elems} | T]}, {Rs_lst_tp, Rs_lst_elems}, Vars) ->
-    Rs_elem_lst = find_lst_among_elems(Rs_lst_elems),
-    {_Elem_tp, Upd_vars} = bound_cons_vars({ungen_list, Ls_lst_Elems}, Rs_elem_lst, Vars),
+bound_cons_vars({Lst_tp, [{ungen_tuple, Ls_tuple_elems} | T]}, {Rs_lst_tp, Rs_lst_elems}, Vars) ->
+    Rs_tuple_elem = find_tuple_among_elems(Rs_lst_elems),
+    {_Elem_tp, Upd_vars} = bound_tuple_vars({ungen_tuple, Ls_tuple_elems}, Rs_tuple_elem, Rs_tuple_elem, Vars),
+    bound_cons_vars({Lst_tp, T}, {Rs_lst_tp, Rs_lst_elems}, Upd_vars); 
+bound_cons_vars({Lst_tp, [{ungen_list, Ls_lst_elems} | T]}, {Rs_lst_tp, Rs_lst_elems}, Vars) ->
+    Rs_lst_elem = find_lst_among_elems(Rs_lst_elems),
+    {_Elem_tp, Upd_vars} = bound_cons_vars({ungen_list, Ls_lst_elems}, Rs_lst_elem, Vars),
     bound_cons_vars({Lst_tp, T}, {Rs_lst_tp, Rs_lst_elems}, Upd_vars);                                                                        
 bound_cons_vars({Lst_tp, [{variable, [Var_name]} | T]}, Rs_cons_tp, Vars) ->
 	case is_bounded(Var_name, Vars) of
@@ -322,7 +362,7 @@ bound_cons_vars(Rs_cons = {_Lst_tp, [{'...', [Var_name]}]}, Rs_cons_tp, Vars) ->
 		false -> New_var = bound_cons_var(Rs_cons, Rs_cons_tp),
 		         {Rs_cons_tp, [New_var | Vars]}
 	end;
-bound_cons_vars({Lst_tp, {Elem_tp, Elem_Val}}, Rs_cons_tp, Vars) ->
+bound_cons_vars({_Lst_tp, {_Elem_tp, _Elem_Val}}, Rs_cons_tp, Vars) ->
 	{Rs_cons_tp, Vars};
 bound_cons_vars({Lst_tp, [_Elem | T]}, Rs_cons_tp, Vars) ->
 	bound_cons_vars({Lst_tp, T}, Rs_cons_tp, Vars).
@@ -339,8 +379,6 @@ bound_cons_var({ungen_list, [{variable, [Var_name]}]}, {_Rs_lst_tp, [Proper_part
 	{Var_name, [Proper_part]}.
 
 
-
-
 generalize_elems(Elems, []) ->
 	generalize_elems(Elems, ?ELEMS_TBL);
 generalize_elems([], Elems_tbl) ->
@@ -350,6 +388,7 @@ generalize_elems([], Elems_tbl) ->
 generalize_elems([Elem | Elems], Elems_tbl) ->
 	Upd_elems_tbl = upd_elems_tbl_with_new_elem(Elem, Elems_tbl),
 	generalize_elems(Elems, Upd_elems_tbl).
+
 
 generalize_term(Term, []) ->
 generalize_term(Term, ?ELEMS_TBL);
@@ -399,6 +438,8 @@ convert_elems_tbl_to_internal_format([{_Label, Tp} | T], Res) ->
 	convert_elems_tbl_to_internal_format(T, [Tp | Res]).
 
 
+upd_elems_tbl_with_new_elem({any, []}, Elems_tbl) ->
+	set_elems_tbl_to_any(Elems_tbl);
 upd_elems_tbl_with_new_elem({union, Elem_val}, Elems_tbl) ->
 	upd_elems_tbl_with_new_elems(Elem_val, Elems_tbl);
 upd_elems_tbl_with_new_elem({boolean, Elem_val}, Elems_tbl) ->
@@ -1717,7 +1758,27 @@ test() ->
 										                {integer,[3]}]}]}]}),
 
 	Test72 = infer_fun_type(unit_test, cons_bound8, 0, []),
-	erlang:display({test72, cons_bound8, Test72 == [{union,[{integer,[1]},{integer,[2]}]}]}).
+	erlang:display({test72, cons_bound8, Test72 == [{union,[{integer,[1]},{integer,[2]}]}]}),
+
+	Test77 = infer_fun_type(unit_test, cons_bound9, 0, []),
+	erlang:display({test77, cons_bound9, Test77 == [{tuple,[{integer,[1]},{integer,[2]},{integer,[3]}]}]}),
+
+%Tuple bound
+
+	Test73 = infer_fun_type(unit_test, tuple_bound, 0, []),
+	erlang:display({test73, tuple_bound, Test73 == [{integer,[1]}]}),
+
+	Test74 = infer_fun_type(unit_test, tuple_bound2, 0, []),
+	erlang:display({test74, tuple_bound2, Test74 == [{integer,[1]}]}),
+
+	Test75 = infer_fun_type(unit_test, tuple_bound3, 0, []),
+	erlang:display({test75, tuple_bound3, Test75 == [{tuple,[{integer,[4]},{integer,[5]}]}]}),
+
+	Test76 = infer_fun_type(unit_test, tuple_bound4, 1, []),
+	erlang:display({test76, tuple_bound4, Test76 == [{tuple,[{any,[]},{integer,[5]}]}]}).
+
+
+
 
 
 

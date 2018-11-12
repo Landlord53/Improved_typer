@@ -161,3 +161,29 @@ cons_bound8() ->
 	[B,2 | 3] = A,
 	B.
 
+cons_bound9() ->
+	A = [{1,2,3}, 4,5],
+	[{B, C, D}, 4,5] = A,
+	{B, C, D}.
+
+
+%Tuple bounding
+tuple_bound() -> 
+	A = {1,2,3},
+	{B, 2, 3} = A,
+	B.
+
+tuple_bound2() ->
+	A = {[1],2,3},
+	{[B], 2, 3} = A,
+	B.
+
+tuple_bound3() ->
+	A = {{4,5},2,3},
+	{{B,C}, 2, 3} = A,
+	{B, C}.
+
+tuple_bound4(R) -> 
+	A = {{R,5},2,3},
+	{{B,C}, 2, 3} = A,
+	{B, C}.
