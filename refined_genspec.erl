@@ -230,17 +230,12 @@ infer_internal_fun(Mod_name, Fun_name, Arg_list_expr, Parent_fun_variables) ->
 
 	Arg_list = lists:map(Fun, Arg_list_children),
 	Arity = length(Arg_list),
-	%Actual_clauses_with_pats = find_actual_clauses(Mod_name, Fun_name, Arity, Arg_list_children),
-	%Actual_clauses = lists:map(fun({Clause, _}) -> Clause end, Actual_clauses_with_pats),
-	%Clauses_patterns = lists:map(fun({_, Pat}) -> Pat end, Actual_clauses_with_pats),
+	Actual_clauses_with_pats = find_actual_clauses(Mod_name, Fun_name, Arity, Arg_list),
+	Actual_clauses = lists:map(fun({Clause, _}) -> Clause end, Actual_clauses_with_pats),
+	Clauses_patterns = lists:map(fun({_, Pat}) -> Pat end, Actual_clauses_with_pats),
 
-	Fun_node = get_fun_node(Mod_name, Fun_name, Arity),
-	Fun_def = get_fundef(Fun_node),
-	Clauses = get_clauses(Fun_def),
-	Patterns = [get_patterns(Clause) || Clause <- Clauses],
-
-	Variables = replace_clauses_params_with_args(Patterns, Arg_list),
-	Fun_type = get_clauses_type(Clauses, Variables),
+	Variables = replace_clauses_params_with_args(Clauses_patterns, Arg_list),
+	Fun_type = get_clauses_type(Actual_clauses, Variables),
 
 	case length(Fun_type) of
 		1 -> hd(Fun_type);
@@ -1138,16 +1133,27 @@ find_actual_clauses(Mod_name, Fun_name, Arity, Actual_params) ->
 
 find_actual_clause([], _) -> [];
 find_actual_clause([Pat | Pats], Pars) ->
-	Res = compare_terms(Pat, Pars),
+	Res = compare_pat_with_actual_pars(Pat, Pars, true),
 
 	case Res of 
 		true     -> [Clause] = 
-		?Query:exec(hd(Pat), ?Expr:clause()),
+		            	?Query:exec(hd(Pat), ?Expr:clause()),
 				    [{Clause, Pat}];
 		possibly -> [Clause] = ?Query:exec(hd(Pat), ?Expr:clause()),
 				 	[{Clause, Pat} | find_actual_clause(Pats, Pars)];
 		false    -> find_actual_clause(Pats, Pars)
 	end.
+
+compare_pat_with_actual_pars([], [], Status) ->
+	Status;
+compare_pat_with_actual_pars([Pat_elem | Pat_elems], [Par | Pars], Status) ->
+	{Gen_pat_tp, _Upd_vars} = infer_expr_inf(Pat_elem, []),
+
+	case are_matching_types(Gen_pat_tp, Par) of
+		false    -> false;
+		possibly -> compare_pat_with_actual_pars(Pat_elems, Pars, possibly);
+		true     -> compare_pat_with_actual_pars(Pat_elems, Pars, Status)
+	end.      
 
 is_union_match({union, []}, _Elem2) ->
 	false;
@@ -1970,11 +1976,10 @@ test() ->
 	erlang:display({test78, match_expr, Test78 == [{integer,[4]}]}),
 
 	Test79 = infer_fun_type(unit_test, cons_bound10, 0, []),
-	erlang:display({test79, cons_bound10, Test79 == [{tuple,[{integer,[3]},{integer,[4]},{integer,[5]}]}]}).
+	erlang:display({test79, cons_bound10, Test79 == [{tuple,[{integer,[3]},{integer,[4]},{integer,[5]}]}]}),
 
-
-
-
+	Test80 = infer_fun_type(unit_test, cl_mat, 0, []),
+	erlang:display({test80, cl_mat, Test80 == [{atom,[horoso]}]}).
 
 
 

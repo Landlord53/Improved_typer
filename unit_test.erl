@@ -196,3 +196,16 @@ tuple_bound4(R) ->
 match_expr(A) -> 
 	4 = A,
 	A.
+
+%Clause matching 
+
+cl_mat() ->
+	A = {1,2,{1,2,3}},
+	cl_mat_hp(A, da).
+
+cl_mat_hp(ok, da) ->
+	ok;
+cl_mat_hp({1, 2, C}, net) ->
+	error;
+cl_mat_hp({A, B, C}, da) ->
+	horoso.
