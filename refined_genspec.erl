@@ -244,13 +244,21 @@ infer_internal_fun(Mod_name, Fun_name, Arg_list_expr, Parent_fun_variables) ->
 
 replace_clauses_params_with_args([], _) -> [];
 replace_clauses_params_with_args([Pat | Pats], Args) ->
-	[replace_clause_params_with_args(Pat, Args) | replace_clauses_params_with_args(Pats, Args)].
+	Upd_vars = replace_clause_params_with_args(Pat, Args, []),
+	[Upd_vars | replace_clauses_params_with_args(Pats, Args)].
 
-replace_clause_params_with_args([], []) -> [];
-replace_clause_params_with_args([Par | Pars], [Arg | Args]) ->
+replace_clause_params_with_args([], [], Vars) -> Vars;
+replace_clause_params_with_args([Par | Pars], [Arg | Args], Vars) ->
 	case ?Expr:type(Par) of
-		variable -> [{?Expr:value(Par), [Arg]} | replace_clause_params_with_args(Pars, Args)];
-		_        -> replace_clause_params_with_args(Pars, Args)
+		variable -> {_New_var, Upd_vars} = bound_var(?Expr:value(Par), Arg, Vars), 
+		            replace_clause_params_with_args(Pars, Args, Upd_vars);
+		cons     -> {Ls_cons_in_cf, Upd_vars} = construct_and_convert_cons_to_cf(Par, Vars),
+					{_Expr_tp, Upd_vars2} = bound_cons_vars(Ls_cons_in_cf, Arg, Upd_vars),
+					replace_clause_params_with_args(Pars, Args, Upd_vars2);
+		tuple    -> {Ls_tuple_in_cf, Upd_vars} = construct_and_convert_tuple_to_cf(Par, Vars),
+					{_Expr_tp, Upd_vars2} = bound_tuple_vars(Ls_tuple_in_cf, Arg, Arg, Upd_vars),
+					replace_clause_params_with_args(Pars, Args, Upd_vars2);
+		_Other   -> replace_clause_params_with_args(Pars, Args, Vars)	
 	end.
 
 infer_parenthesis_inf(Expr, Vars) ->
@@ -261,17 +269,20 @@ infer_match_expr_inf(Expr, Vars) ->
 	[Ls_expr, Rs_expr] = get_children(Expr),
 
 	case ?Expr:type(Ls_expr) of
-		variable   -> bound_a_single_var(Ls_expr, Rs_expr, Vars);
+		variable   -> bound_var_expr(Ls_expr, Rs_expr, Vars);
 		cons       -> bound_cons(Ls_expr, Rs_expr, Vars);
 		tuple      -> bound_tuple(Ls_expr, Rs_expr, Vars);
-		_Simple_tp -> match_simple_tp(Ls_expr, Rs_expr, Vars)
+		_Simple_tp -> match_simple_tp_expr(Ls_expr, Rs_expr, Vars)
 	end.
 
-match_simple_tp(Ls_expr, Rs_expr, Vars) ->
+match_simple_tp_expr(Ls_expr, Rs_expr, Vars) ->
 	case ?Expr:type(Rs_expr) of
-		variable -> {Ls_expr_tp, Upd_vars} = infer_expr_inf(Ls_expr, Vars),
-					New_var = {?Expr:value(Rs_expr), [Ls_expr_tp]},
-					{Ls_expr_tp, [New_var | Upd_vars]};
+		variable -> case is_bounded(?Expr:value(Rs_expr), Vars) of
+						true  -> infer_expr_inf(Ls_expr, Vars);
+						false -> {Ls_expr_tp, Upd_vars} = infer_expr_inf(Ls_expr, Vars),
+								 New_var = {?Expr:value(Rs_expr), [Ls_expr_tp]},
+								 {Ls_expr_tp, [New_var | Upd_vars]}
+					end;
 		_        -> {Ls_expr_tp, Upd_vars} = infer_expr_inf(Ls_expr, Vars),
 					{_Rs_expr_tp, Upd_vars2} = infer_expr_inf(Rs_expr, Upd_vars),
 					{Ls_expr_tp, Upd_vars2}
@@ -302,16 +313,19 @@ bound_tuple_vars({ungen_tuple, [{ungen_tuple, Tuple_elems} | Ls_elems]}, {tuple,
 bound_tuple_vars({ungen_tuple, [_Ls_elem | Ls_elems]}, {tuple, [_Rs_elem | Rs_elems]}, Match_expr_tp, Vars) ->
 	bound_tuple_vars({ungen_tuple, Ls_elems}, {tuple, Rs_elems}, Match_expr_tp, Vars).
 
-bound_a_single_var(Ls_expr, Rs_expr, Vars) ->
+bound_var_expr(Ls_expr, Rs_expr, Vars) ->
 	Var_name = ?Expr:value(Ls_expr),
 	Is_bounded = is_bounded(Var_name, Vars),
 
 	case Is_bounded of
 		true  -> infer_expr_inf(Ls_expr, Vars);
-		false -> {Rs_cons_tp, Upd_vars} = infer_expr_inf(Rs_expr, Vars),
-				 New_var = {Var_name, [Rs_cons_tp]},
-				 {Rs_cons_tp, [New_var | Upd_vars]}
+		false -> {Rs_expr_tp, Upd_vars} = infer_expr_inf(Rs_expr, Vars),
+		         bound_var(Var_name, Rs_expr_tp, Upd_vars)
 	end.
+
+bound_var(Var_name, Rs_expr_tp, Vars) ->
+	New_var = {Var_name, [Rs_expr_tp]},
+	{Rs_expr_tp, [New_var | Vars]}.
 
 find_lst_among_elems([]) -> [];
 find_lst_among_elems([{union, Elems} | _T]) ->
