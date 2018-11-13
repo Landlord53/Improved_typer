@@ -160,10 +160,10 @@ find_var_by_name(Required_var_Name, Variables) ->
 		[Var] -> Var
 	end.
 
-is_bounded(Variable_name, Vars) ->
-	Variable = find_var_by_name(Variable_name, Vars),
+is_bounded(Var_name, Vars) ->
+	Var = find_var_by_name(Var_name, Vars),
 
-	case Variable of
+	case Var of
 		{variable, _Var_name} -> false;
 		_  -> true
 	end.
@@ -234,12 +234,11 @@ infer_internal_fun(Mod_name, Fun_name, Arg_list_expr, Parent_fun_vars) ->
 
 	Arg_list = lists:map(Fun, Arg_list_children),
 	Arity = length(Arg_list),
-	Actual_clauses_with_pats = find_actual_clauses(Mod_name, Fun_name, Arity, Arg_list, Parent_fun_vars),
-	Actual_clauses = lists:map(fun({Clause, _}) -> Clause end, Actual_clauses_with_pats),
-	Clauses_patterns = lists:map(fun({_, Pat}) -> Pat end, Actual_clauses_with_pats),
+	Clauses_vars_pair = find_actual_clauses(Mod_name, Fun_name, Arity, Arg_list),
+	Actual_clauses = lists:map(fun({Clause, _}) -> Clause end, Clauses_vars_pair),
+	Vars = lists:map(fun({_, Var}) -> Var end, Clauses_vars_pair),
 
-	Variables = replace_clauses_params_with_args(Clauses_patterns, Arg_list),
-	Fun_type = get_clauses_type(Actual_clauses, Variables),
+	Fun_type = get_clauses_type(Actual_clauses, Vars),
 
 	case length(Fun_type) of
 		1 -> hd(Fun_type);
@@ -1244,7 +1243,7 @@ get_actual_params(Application) ->
 	?Query:exec(Args_list, ?Expr:children()).	
 
 %----------------------------------Defining actual clauses-------------------------------------
-find_actual_clauses(Mod_name, Fun_name, Arity, Actual_params, Vars) ->
+find_actual_clauses(Mod_name, Fun_name, Arity, Actual_params) ->
 	Fun_node = get_fun_node(Mod_name, Fun_name, Arity),
 	Fun_def = get_fundef(Fun_node),
 	Clauses = get_clauses(Fun_def),
@@ -1254,30 +1253,47 @@ find_actual_clauses(Mod_name, Fun_name, Arity, Actual_params, Vars) ->
 	case Actual_params of
 		[] -> [Clause] = get_clauses(Fun_def),
 			  [{Clause, []}];
-		_  -> filter_clauses(Pat_exprs, Actual_params, Guards, Vars)   
+		_  -> filter_clauses(Pat_exprs, Actual_params, Guards)   
 	end.
 
-filter_clauses([], _Pars, [], _Vars) ->
+filter_clauses([], _Pars, []) ->
 	[];
-filter_clauses([Pat_expr | Pat_exprs], Pars, [Guard | Guards], Vars) ->
-	Is_guard_matched = filter_clauses_by_guards(Guard, Vars),
+filter_clauses([Pat_expr | Pat_exprs], Pars, [Guard | Guards]) ->
+	Upd_vars = replace_clause_params_with_args(Pat_expr, Pars, []),
+	Pat = obtain_pats_tp(Pat_expr, Upd_vars),
+	Is_pars_matched = compare_pat_with_actual_pars(Pat, Pars, true),
+
+	case Is_pars_matched of
+		true -> 
+                Is_guard_matched = filter_clause_by_guards(Guard, Upd_vars),
+
+                case Is_guard_matched of
+                	false    -> filter_clauses(Pat_exprs, Pars, Guards);
+                	possibly -> [Clause] = ?Query:exec(hd(Pat_expr), ?Expr:clause()),
+                	            [{Clause, Upd_vars} | filter_clauses(Pat_exprs, Pars, Guards)];
+                	true     -> [Clause] = ?Query:exec(hd(Pat_expr), ?Expr:clause()),
+                				[{Clause, Upd_vars}]
+                end;
+        possibly -> Is_guard_matched = filter_clause_by_guards(Guard, Upd_vars),
+
+	                case Is_guard_matched of
+	                	false    -> filter_clauses(Pat_exprs, Pars, Guards);
+	                	_        -> [Clause] = ?Query:exec(hd(Pat_expr), ?Expr:clause()),
+	                	            [{Clause, Upd_vars} | filter_clauses(Pat_exprs, Pars, Guards)]
+	                end;
+	    false    -> filter_clauses(Pat_exprs, Pars, Guards)
+	end.
+
+
+filter_clause_by_guards(Guard, Vars) -> 
+	{Is_guard_matched, _Upd_vars} = infer_expr_inf(Guard, Vars),
 
 	case Is_guard_matched of
-		false -> filter_clauses(Pat_exprs, Pars, Guards, Vars);
-		_     -> Pat = obtain_pats_tp(Pat_expr),
-		         Is_clause_matched = compare_pat_with_actual_pars(Pat, Pars, Is_guard_matched),
-
-		         case Is_clause_matched of
-		         	false    -> filter_clauses(Pat_exprs, Pars, Guards, Vars);
-		         	possibly -> [Clause] = ?Query:exec(hd(Pat_expr), ?Expr:clause()),
-		         	            [{Clause, Pat_expr} | filter_clauses(Pat_exprs, Pars, Guards, Vars)];
-		         	true     -> [Clause] = ?Query:exec(hd(Pat_expr), ?Expr:clause()),
-				                [{Clause, Pat_expr}]
-				end
+		{boolean, [true]}  -> true;
+		{boolean, []}      -> possibly;
+		{boolean, [false]} -> false
 	end.
 
-filter_clauses_by_guards(_Guard, _Vars) -> 
-	true.
 
 compare_pat_with_actual_pars([], [], Status) ->
 	Status;
@@ -1299,10 +1315,10 @@ obtain_clauses_guards([Clause | Clauses]) ->
 	end.  
 
 
-obtain_pats_tp([]) -> [];
-obtain_pats_tp([Pat_expr | Pat_exprs]) ->
-	{Pat, _Upd_vars} = infer_expr_inf(Pat_expr, []),	
-	[Pat | obtain_pats_tp(Pat_exprs)].	  
+obtain_pats_tp([], _Vars) -> [];
+obtain_pats_tp([Pat_expr | Pat_exprs], Vars) ->
+	{Pat, _Upd_vars} = infer_expr_inf(Pat_expr, Vars),	
+	[Pat | obtain_pats_tp(Pat_exprs, Vars)].	  
 
 is_union_match({union, []}, _Elem2) ->
 	false;
