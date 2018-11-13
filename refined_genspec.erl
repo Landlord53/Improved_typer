@@ -85,7 +85,7 @@ infer_expr_inf(Expr, Vars) ->
 		match_expr -> infer_match_expr_inf(Expr, Vars);
 		infix_expr -> {infer_infix_expr_type(Expr, ?Expr:value(Expr), Vars), Vars};
 		variable   -> {infer_var_type(Expr, Vars), Vars};
-		parenthesis -> {infer_parenthesis_inf(Expr, Vars), Vars};
+		parenthesis -> infer_parenthesis_inf(Expr, Vars);
 		fun_expr    -> Fun_expr = {fun_expr, Expr},
 		               {Fun_expr, Vars};
 		application -> {infer_fun_app_type(Expr, Vars), Vars};
@@ -1590,7 +1590,7 @@ test() ->
 	erlang:display({test6, af4_2, Test6 == [{integer, [3]}]}),
 
 	Test7 = infer_fun_type(unit_test, lfac_2, 0, []),
-	erlang:display({test7, lfac_2, Test7 == [{any,[]}]}),
+	erlang:display({test7, lfac_2, Test7 == [{union,[{integer,[1]},{integer,[2]}]}]}),
 
 	Test8 = infer_fun_type(unit_test, lfac2_2, 0, []),
 	erlang:display({test8, lfac2_2, Test8 == [{atom,[ok]}]}),
