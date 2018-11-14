@@ -209,3 +209,24 @@ cl_mat_hp({1, 2, C}, net) ->
 	error;
 cl_mat_hp({A, B, C}, da) ->
 	horoso.
+
+
+cl_mat2(A) -> 
+	A = 2,
+	cl_mat_hp2(A, 7).
+
+cl_mat_hp2(A, 4) ->
+	ok;
+cl_mat_hp2(Var1, A) when A == 7 ->
+	eror.
+
+
+cl_mat3(A) -> 
+	Var1 = 2,
+	cl_mat_hp3(Var1, 7).
+
+cl_mat_hp3(A, 7) when A > 1 ->
+	ok;
+cl_mat_hp3(Var1, A) when A == 7 ->
+	eror.
+

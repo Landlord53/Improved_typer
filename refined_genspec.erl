@@ -1284,7 +1284,8 @@ filter_clauses([Pat_expr | Pat_exprs], Pars, [Guard | Guards]) ->
 	    false    -> filter_clauses(Pat_exprs, Pars, Guards)
 	end.
 
-
+filter_clause_by_guards([], _Vars) ->
+	true;
 filter_clause_by_guards(Guard, Vars) -> 
 	{Is_guard_matched, _Upd_vars} = infer_expr_inf(Guard, Vars),
 
@@ -2145,7 +2146,13 @@ test() ->
 	erlang:display({test79, cons_bound10, Test79 == [{tuple,[{integer,[3]},{integer,[4]},{integer,[5]}]}]}),
 
 	Test80 = infer_fun_type(unit_test, cl_mat, 0, []),
-	erlang:display({test80, cl_mat, Test80 == [{atom,[horoso]}]}).
+	erlang:display({test80, cl_mat, Test80 == [{atom,[horoso]}]}),
+
+	Test81 = infer_fun_type(unit_test, cl_mat2, 1, []),
+	erlang:display({test81, cl_mat2, Test81 == [{atom,[eror]}]}),
+
+	Test82 = infer_fun_type(unit_test, cl_mat3, 1, []),
+	erlang:display({test82, cl_mat3, Test82 == [{atom,[ok]}]}).
 
 
 
