@@ -48,6 +48,11 @@
 		nonempty_maybe_improper_list, list
 	]).
 
+-define(BIFs, [
+			   is_atom, is_boolean, is_float, is_function,
+               is_integer, is_list, is_number, is_tuple
+    ]).
+
 infer_fun_type(Mod_name, Fun_name, Arity, Variables) ->
 	Fun_node = get_fun_node(Mod_name, Fun_name, Arity),
 	Fun_def = get_fundef(Fun_node),
@@ -138,19 +143,43 @@ infer_tuple_expr_type(Tuple_expr, Vars) ->
 	{generalize_term(Tuple_in_cf, []), Upd_vars}.
 
 
-infer_fun_app_type(Fun_app, Vars) ->
-	[Expr, Arg_list] = ?Query:exec(Fun_app, ?Expr:children()),
+infer_fun_app_type(Fun_app_expr, Vars) ->
+	[Fun_info_expr, Arg_lst_expr] = ?Query:exec(Fun_app_expr, ?Expr:children()),
 
-	case ?Expr:type(Expr) of 
-			variable -> infer_anonymus_function(?Expr:value(Expr), Arg_list, Vars);
-			_        ->	case ?Expr:value(Expr) of
-							':'      -> [Module, Fun] = ?Query:exec(Expr, ?Expr:children()),
-										infer_external_fun(?Expr:value(Module), ?Expr:value(Fun), Arg_list, Vars);
-							_        -> Function = ?Query:exec(Fun_app, ?Expr:function()),
-						                [Fun_mod] = ?Query:exec(Function, ?Fun:module()),
-										infer_internal_fun(?Mod:name(Fun_mod), ?Expr:value(Expr), Arg_list, Vars)
-						end
+	case ?Expr:type(Fun_info_expr) of 
+			variable -> infer_anonymus_fun_tp(?Expr:value(Fun_info_expr), Arg_lst_expr, Vars);
+			_        ->	infer_fun_tp(Fun_app_expr, Fun_info_expr, Arg_lst_expr, Vars)
 	end.
+
+infer_fun_tp(Fun_app_expr, Fun_info_expr, Arg_lst_expr, Vars) ->
+	case ?Expr:value(Fun_info_expr) of
+		':'      -> [Mod_name_expr, Fun_name_expr] = ?Query:exec(Fun_info_expr, ?Expr:children()),
+				    Mod_name = ?Expr:value(Mod_name_expr),
+				    Fun_name = ?Expr:value(Fun_name_expr),
+			        infer_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars);
+		Fun_name -> Fun_expr = ?Query:exec(Fun_app_expr, ?Expr:function()),
+		            [Fun_mod_expr] = ?Query:exec(Fun_expr, ?Fun:module()),
+		            Mod_name = ?Mod:name(Fun_mod_expr),
+		            infer_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars)
+	end.
+
+infer_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars) ->
+	case Mod_name of
+		erlang     -> infer_BIF_fun_tp(Fun_name, Arg_lst_expr, Vars);
+		_Any_other -> infer_non_BIF_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars)
+	end.
+
+
+infer_BIF_fun_tp(_Fun_name, _Arg_lst_expr, _Vars) ->
+	{boolean, [true]}.
+
+
+infer_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars) ->
+	case lists:member(Fun_name, ?BIFs) of
+		true  -> infer_BIF_fun_tp(Fun_name, Arg_lst_expr, Vars);
+		false -> infer_non_BIF_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars)
+	end.
+
 
 find_var_by_name(Required_var_Name, Variables) ->
 	Res = lists:filter(fun({Var_name, _}) -> Required_var_Name == Var_name end, Variables),
@@ -160,6 +189,7 @@ find_var_by_name(Required_var_Name, Variables) ->
 		[Var] -> Var
 	end.
 
+
 is_bounded(Var_name, Vars) ->
 	Var = find_var_by_name(Var_name, Vars),
 
@@ -168,12 +198,13 @@ is_bounded(Var_name, Vars) ->
 		_  -> true
 	end.
 
-infer_anonymus_function(Var_name, Arg_lst_expr, Vars) ->
+
+infer_anonymus_fun_tp(Var_name, Arg_lst_expr, Vars) ->
 	case find_var_by_name(Var_name, Vars) of
 		{variable, _Var_name}         -> infer_anon_func_app_without_body(Arg_lst_expr, Vars);
 		{Var_name, [{fun_expr, _}]}   -> infer_anon_func_app(Var_name, Arg_lst_expr, Vars);
-		{Var_name, [{implicit_fun, {{current_mod, Mod_name}, Fun_name, _Arity}}]}  -> infer_internal_fun(Mod_name, Fun_name, Arg_lst_expr, Vars);
-		{Var_name, [{implicit_fun, {{external_mod, Mod_name}, Fun_name, _Arity}}]} -> infer_external_fun(Mod_name, Fun_name, Arg_lst_expr, Vars);
+		{Var_name, [{implicit_fun, {{current_mod, Mod_name}, Fun_name, _Arity}}]}  -> infer_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars);
+		{Var_name, [{implicit_fun, {{external_mod, Mod_name}, Fun_name, _Arity}}]} -> infer_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars);
 		_                           -> {none, []}
 	end.
 
@@ -215,18 +246,18 @@ replace_shadowed_vars_val({Var_name, Val1}, [{Var_name, _Val2} | Vars], New_var_
 replace_shadowed_vars_val(Anon_fun_var, [Var | Vars], New_var_list) ->
 	replace_shadowed_vars_val(Anon_fun_var, Vars, [Var | New_var_list]).
 
-infer_external_fun(Mod_name, Fun_name, Arg_list_expr, Variables) ->
-	Arg_list = ?Query:exec(Arg_list_expr, ?Expr:children()),
+infer_non_BIF_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars) ->
+	Arg_list = ?Query:exec(Arg_lst_expr, ?Expr:children()),
 	Arity = length(Arg_list),
 	Spec_info = spec_proc:get_spec_type(Mod_name, Fun_name, Arity),
 
 	case Spec_info of
 		{_, [Return_type]} -> Return_type;
-		[] -> infer_internal_fun(Mod_name, Fun_name, Arg_list_expr, Variables)
+		[] -> infer_non_BIF_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars)
 	end.
 
-infer_internal_fun(Mod_name, Fun_name, Arg_list_expr, Parent_fun_vars) ->
-	Arg_list_children = ?Query:exec(Arg_list_expr, ?Expr:children()),
+infer_non_BIF_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Parent_fun_vars) ->
+	Arg_list_children = ?Query:exec(Arg_lst_expr, ?Expr:children()),
 
 	Fun = fun(Arg) -> {Tp, _} = infer_expr_inf(Arg, Parent_fun_vars),
 		              Tp
