@@ -48,9 +48,12 @@
 		nonempty_maybe_improper_list, list
 	]).
 
+
 -define(BIFs, [
-			   is_atom, is_boolean, is_float, is_function,
-               is_integer, is_list, is_number, is_tuple
+				is_atom, is_binary, is_bitstring, is_boolean,
+				is_float ,is_function, is_integer, is_list, 
+				is_map, is_number, is_pid, is_port,
+				is_record, is_reference, is_tuple
     ]).
 
 infer_fun_type(Mod_name, Fun_name, Arity, Variables) ->
@@ -165,18 +168,38 @@ infer_fun_tp(Fun_app_expr, Fun_info_expr, Arg_lst_expr, Vars) ->
 
 infer_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars) ->
 	case Mod_name of
-		erlang     -> infer_BIF_fun_tp(Fun_name, Arg_lst_expr, Vars);
+		erlang     -> infer_BIFs(Fun_name, Arg_lst_expr, Vars);
 		_Any_other -> infer_non_BIF_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars)
 	end.
 
+infer_BIFs(Fun_name, Arg_lst_expr, Vars) ->
+	Arg_lst_elems_exrps = ?Query:exec(Arg_lst_expr, ?Expr:children()),
 
-infer_BIF_fun_tp(_Fun_name, _Arg_lst_expr, _Vars) ->
-	{boolean, [true]}.
+	Infer_expr_tp = 
+		fun(Arg_lst_elem) -> {Elem_tp, _Upd_vars} = infer_expr_inf(Arg_lst_elem, Vars),
+			                 Elem_tp
+	end,
+
+	Arg_lst = lists:map(Infer_expr_tp, Arg_lst_elems_exrps),
+	infer_BIF_fun_tp(Fun_name, Arg_lst). 
+
+
+infer_BIF_fun_tp(Fun_name, _Arg_lst) when (Fun_name == is_atom)     or (Fun_name == is_binary) 
+									  or (Fun_name == is_bitstring) or (Fun_name == is_boolean)
+									  or (Fun_name == is_float)     or (Fun_name == is_function)
+		                              or (Fun_name == is_integer)   or (Fun_name == is_list) 
+		                              or (Fun_name == is_map)       or (Fun_name == is_number)
+		                              or (Fun_name == is_pid)       or (Fun_name == is_port)
+		                              or (Fun_name == is_record)    or (Fun_name == is_reference)
+		                              or (Fun_name == is_tuple) ->
+	{boolean, []}.
+
+	
 
 
 infer_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars) ->
 	case lists:member(Fun_name, ?BIFs) of
-		true  -> infer_BIF_fun_tp(Fun_name, Arg_lst_expr, Vars);
+		true  -> infer_BIFs(Fun_name, Arg_lst_expr, Vars);
 		false -> infer_non_BIF_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars)
 	end.
 
@@ -208,14 +231,17 @@ infer_anonymus_fun_tp(Var_name, Arg_lst_expr, Vars) ->
 		_                           -> {none, []}
 	end.
 
+
 infer_anon_func_app_without_body(Arg_lst_expr, _Vars) ->
 	Arg_lst_children = ?Query:exec(Arg_lst_expr, ?Expr:children()),
-	Fun = fun(Arg) -> {Tp, _} = infer_expr_inf(Arg, []),
-	 				  Tp 
+	Fun = 
+		fun(Arg) -> {Tp, _} = infer_expr_inf(Arg, []),
+	 				Tp 
 	end,
 
 	Arg_lst = lists:map(Fun, Arg_lst_children),
 	{func, [Arg_lst, [any]]}.
+
 
 infer_anon_func_app(Var_name, Arg_lst_expr, Vars) ->
 	{_Var_name, [{fun_expr, Fun_expr}]} = find_var_by_name(Var_name, Vars),
@@ -234,17 +260,20 @@ infer_anon_func_app(Var_name, Arg_lst_expr, Vars) ->
 	
 	get_clause_type(Clause, New_var_list).
 
+
 replace_shadowed_vars_vals([], Vars) -> Vars;
 replace_shadowed_vars_vals([Anon_fun_var | Anon_fun_vars], Vars) ->
 	New_var_list = replace_shadowed_vars_val(Anon_fun_var, Vars, []),
 	replace_shadowed_vars_vals(Anon_fun_vars, New_var_list).
 	
+
 replace_shadowed_vars_val(Anon_fun_var, [], New_var_list) ->
 	[Anon_fun_var | New_var_list];
 replace_shadowed_vars_val({Var_name, Val1}, [{Var_name, _Val2} | Vars], New_var_list) ->
 	[{Var_name, Val1} | New_var_list] ++ Vars;
 replace_shadowed_vars_val(Anon_fun_var, [Var | Vars], New_var_list) ->
 	replace_shadowed_vars_val(Anon_fun_var, Vars, [Var | New_var_list]).
+
 
 infer_non_BIF_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars) ->
 	Arg_list = ?Query:exec(Arg_lst_expr, ?Expr:children()),
@@ -255,6 +284,7 @@ infer_non_BIF_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars) ->
 		{_, [Return_type]} -> Return_type;
 		[] -> infer_non_BIF_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars)
 	end.
+
 
 infer_non_BIF_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Parent_fun_vars) ->
 	Arg_list_children = ?Query:exec(Arg_lst_expr, ?Expr:children()),
@@ -276,10 +306,12 @@ infer_non_BIF_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Parent_fun_vars)
 		_ -> {union, Fun_type}
 	end.
 
+
 replace_clauses_params_with_args([], _) -> [];
 replace_clauses_params_with_args([Pat | Pats], Args) ->
 	Upd_vars = replace_clause_params_with_args(Pat, Args, []),
 	[Upd_vars | replace_clauses_params_with_args(Pats, Args)].
+
 
 replace_clause_params_with_args([], [], Vars) -> Vars;
 replace_clause_params_with_args([Par | Pars], [Arg | Args], Vars) ->
@@ -295,9 +327,11 @@ replace_clause_params_with_args([Par | Pars], [Arg | Args], Vars) ->
 		_Other   -> replace_clause_params_with_args(Pars, Args, Vars)	
 	end.
 
+
 infer_parenthesis_inf(Expr, Vars) ->
 	[Child] = get_children(Expr),
 	infer_expr_inf(Child, Vars).
+
 
 infer_match_expr_inf(Expr, Vars) ->
 	[Ls_expr, Rs_expr] = get_children(Expr),
@@ -308,6 +342,7 @@ infer_match_expr_inf(Expr, Vars) ->
 		tuple      -> bound_tuple(Ls_expr, Rs_expr, Vars);
 		_Simple_tp -> match_simple_tp_expr(Ls_expr, Rs_expr, Vars)
 	end.
+
 
 match_simple_tp_expr(Ls_expr, Rs_expr, Vars) ->
 	case ?Expr:type(Rs_expr) of
@@ -347,6 +382,7 @@ bound_tuple_vars({ungen_tuple, [{ungen_tuple, Tuple_elems} | Ls_elems]}, {tuple,
 bound_tuple_vars({ungen_tuple, [_Ls_elem | Ls_elems]}, {tuple, [_Rs_elem | Rs_elems]}, Match_expr_tp, Vars) ->
 	bound_tuple_vars({ungen_tuple, Ls_elems}, {tuple, Rs_elems}, Match_expr_tp, Vars).
 
+
 bound_var_expr(Ls_expr, Rs_expr, Vars) ->
 	Var_name = ?Expr:value(Ls_expr),
 	Is_bounded = is_bounded(Var_name, Vars),
@@ -357,9 +393,11 @@ bound_var_expr(Ls_expr, Rs_expr, Vars) ->
 		         bound_var(Var_name, Rs_expr_tp, Upd_vars)
 	end.
 
+
 bound_var(Var_name, Rs_expr_tp, Vars) ->
 	New_var = {Var_name, [Rs_expr_tp]},
 	{Rs_expr_tp, [New_var | Vars]}.
+
 
 find_lst_among_elems([]) -> [];
 find_lst_among_elems([{union, Elems} | _T]) ->
@@ -370,6 +408,7 @@ find_lst_among_elems([{Elem_tp, Elem_val} | _Elems]) when (Elem_tp == empty_list
     {Elem_tp, Elem_val};
 find_lst_among_elems([_Elem | Elems]) ->
 	find_lst_among_elems(Elems).
+
 
 find_tuple_among_elems([], _Size) -> [];
 find_tuple_among_elems([{union, Elems} | _T], Size) ->
