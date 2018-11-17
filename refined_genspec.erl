@@ -60,46 +60,50 @@ infer_fun_type(Mod_name, Fun_name, Arity, Variables) ->
 	Fun_node = get_fun_node(Mod_name, Fun_name, Arity),
 	Fun_def = get_fundef(Fun_node),
 	Clauses = get_clauses(Fun_def),
-	Clauses_types = lists:map(fun(Clause) -> get_clause_type(Clause, Variables) end, Clauses),
+	Clauses_types = lists:map(fun(Clause) -> get_clause_type(Clause, Variables, [{Mod_name, Fun_name, Arity}]) end, Clauses),
 
 	case length(Clauses_types) of
 		1 -> Clauses_types;
 		_ -> {union, Clauses_types}
 	end.
 
-get_clause_type(Clause, Variables) ->
+get_clause_type(Clause, Variables, Call_stack) ->
 	Bodies = get_bodies(Clause),
-	define_bodies_type(Bodies, Variables).
+	define_bodies_type(Bodies, Variables, Call_stack).
 
-get_clauses_type([], []) -> [];
-get_clauses_type([Clause | Clauses], [Clause_variables | All_variables]) ->
-	[get_clause_type(Clause, Clause_variables) | get_clauses_type(Clauses, All_variables)].
+get_clauses_type([], [], _Call_stack) -> [];
+get_clauses_type([Clause | Clauses], [Clause_vars | All_vars], Call_stack) ->
+	[get_clause_type(Clause, Clause_vars, Call_stack) | get_clauses_type(Clauses, All_vars, Call_stack)].
 
-define_bodies_type([], _) -> [];
-define_bodies_type([Last_body], Vars) ->
-	{Clause_type, _Upd_vars} = infer_expr_tp(Last_body, Vars),
+define_bodies_type([], _, _Call_stack) -> [];
+define_bodies_type([Last_body], Vars, Call_stack) ->
+	{Clause_type, _Upd_vars} = infer_expr_tp(Last_body, Vars, Call_stack),
 	Clause_type;
-define_bodies_type([Body | Bodies], Vars) ->
-	{_Body_type, Upd_vars} = infer_expr_tp(Body, Vars),
-	define_bodies_type(Bodies, Upd_vars).
+define_bodies_type([Body | Bodies], Vars, Call_stack) ->
+	{Body_type, Upd_vars} = infer_expr_tp(Body, Vars, Call_stack),
+
+	case Body_type of
+		{none, []} -> [];
+	    _          -> define_bodies_type(Bodies, Upd_vars, Call_stack)
+	end.
 
 
 
 %---------------------------------Inference part-----------------------------------------------
 
-infer_expr_tp(Expr, Vars) ->
+infer_expr_tp(Expr, Vars, Call_stack) ->
 	case ?Expr:type(Expr) of
-		prefix_expr -> {infer_prefix_expr_type(Expr, ?Expr:value(Expr), Vars), Vars};
-		match_expr -> infer_match_expr_inf(Expr, Vars);
-		infix_expr -> {infer_infix_expr_type(Expr, ?Expr:value(Expr), Vars), Vars};
-		variable   -> {infer_var_type(Expr, Vars), Vars};
-		parenthesis -> infer_parenthesis_inf(Expr, Vars);
-		fun_expr    -> Fun_expr = {fun_expr, Expr},
-		               {Fun_expr, Vars};
-		application -> {infer_fun_app_type(Expr, Vars), Vars};
-		cons        -> infer_cons_expr_type(Expr, Vars);
-		tuple       -> infer_tuple_expr_type(Expr,Vars);
-		implicit_fun -> {infer_implicit_fun_expr(Expr, Vars), Vars};
+		prefix_expr     -> {infer_prefix_expr_type(Expr, ?Expr:value(Expr), Vars, Call_stack), Vars};
+		match_expr      -> infer_match_expr_inf(Expr, Vars, Call_stack);
+		infix_expr      -> {infer_infix_expr_type(Expr, ?Expr:value(Expr), Vars, Call_stack), Vars};
+		variable        -> {infer_var_type(Expr, Vars), Vars};
+		parenthesis     -> infer_parenthesis_inf(Expr, Vars, Call_stack);
+		fun_expr        -> Fun_expr = {fun_expr, Expr},
+		                   {Fun_expr, Vars};
+		application     -> {infer_fun_app_type(Expr, Vars, Call_stack), Vars};
+		cons            -> infer_cons_expr_type(Expr, Vars, Call_stack);
+		tuple           -> infer_tuple_expr_type(Expr,Vars, Call_stack);
+		implicit_fun    -> {infer_implicit_fun_expr(Expr, Vars), Vars};
 		_Simple_type    -> {infer_simple_type(Expr), Vars}
 	end.
 
@@ -129,47 +133,47 @@ infer_simple_type(Expr) ->
 		_     -> {?Expr:type(Expr), [?Expr:value(Expr)]}
 	end.
 
-construct_and_convert_cons_to_cf(Cons_expr, Vars) ->
-	{Lst, Upd_vars} = construct_list_from_cons_expr(Cons_expr, Vars),
+construct_and_convert_cons_to_cf(Cons_expr, Vars, Call_stack) ->
+	{Lst, Upd_vars} = construct_list_from_cons_expr(Cons_expr, Vars, Call_stack),
 	{convert_value_in_basic_format_to_compound(Lst), Upd_vars}.
 
-infer_cons_expr_type(Cons_expr, Vars) ->
-	{Lst_in_cf, Upd_vars} = construct_and_convert_cons_to_cf(Cons_expr, Vars),
+infer_cons_expr_type(Cons_expr, Vars, Call_stack) ->
+	{Lst_in_cf, Upd_vars} = construct_and_convert_cons_to_cf(Cons_expr, Vars, Call_stack),
 	{generalize_term(Lst_in_cf, []), Upd_vars}.
 
-construct_and_convert_tuple_to_cf(Tuple_expr, Vars) ->
-	{Tuple, Upd_vars} = construct_tuple(Tuple_expr, Vars),
+construct_and_convert_tuple_to_cf(Tuple_expr, Vars, Call_stack) ->
+	{Tuple, Upd_vars} = construct_tuple(Tuple_expr, Vars, Call_stack),
 	{convert_value_in_basic_format_to_compound(Tuple), Upd_vars}.
 
-infer_tuple_expr_type(Tuple_expr, Vars) ->
-	{Tuple_in_cf, Upd_vars} = construct_and_convert_tuple_to_cf(Tuple_expr, Vars),
+infer_tuple_expr_type(Tuple_expr, Vars, Call_stack) ->
+	{Tuple_in_cf, Upd_vars} = construct_and_convert_tuple_to_cf(Tuple_expr, Vars, Call_stack),
 	{generalize_term(Tuple_in_cf, []), Upd_vars}.
 
 
-infer_fun_app_type(Fun_app_expr, Vars) ->
+infer_fun_app_type(Fun_app_expr, Vars, Call_stack) ->
 	[Fun_info_expr, Arg_lst_expr] = ?Query:exec(Fun_app_expr, ?Expr:children()),
 
 	case ?Expr:type(Fun_info_expr) of 
 			variable -> infer_anonymus_fun_tp(?Expr:value(Fun_info_expr), Arg_lst_expr, Vars);
-			_        ->	infer_fun_tp(Fun_app_expr, Fun_info_expr, Arg_lst_expr, Vars)
+			_        ->	infer_fun_tp(Fun_app_expr, Fun_info_expr, Arg_lst_expr, Vars, Call_stack)
 	end.
 
-infer_fun_tp(Fun_app_expr, Fun_info_expr, Arg_lst_expr, Vars) ->
+infer_fun_tp(Fun_app_expr, Fun_info_expr, Arg_lst_expr, Vars, Call_stack) ->
 	case ?Expr:value(Fun_info_expr) of
 		':'      -> [Mod_name_expr, Fun_name_expr] = ?Query:exec(Fun_info_expr, ?Expr:children()),
 				    Mod_name = ?Expr:value(Mod_name_expr),
 				    Fun_name = ?Expr:value(Fun_name_expr),
-			        infer_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars);
+			        infer_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, Call_stack);
 		Fun_name -> Fun_expr = ?Query:exec(Fun_app_expr, ?Expr:function()),
 		            [Fun_mod_expr] = ?Query:exec(Fun_expr, ?Fun:module()),
 		            Mod_name = ?Mod:name(Fun_mod_expr),
-		            infer_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars)
+		            infer_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, Call_stack)
 	end.
 
-infer_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars) ->
+infer_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, Call_stack) ->
 	case Mod_name of
 		erlang     -> infer_BIFs(Fun_name, Arg_lst_expr, Vars);
-		_Any_other -> infer_non_BIF_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars)
+		_Any_other -> infer_non_BIF_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, Call_stack)
 	end.
 
 
@@ -177,7 +181,7 @@ infer_BIFs(Fun_name, Arg_lst_expr, Vars) ->
 	Arg_lst_elems_exprs = ?Query:exec(Arg_lst_expr, ?Expr:children()),
 
 	Infer_expr_tp = 
-		fun(Arg_lst_elem) -> {Elem_tp, _Upd_vars} = infer_expr_tp(Arg_lst_elem, Vars),
+		fun(Arg_lst_elem) -> {Elem_tp, _Upd_vars} = infer_expr_tp(Arg_lst_elem, Vars, []),
 			                 Elem_tp
 	end,
 
@@ -196,10 +200,10 @@ infer_BIF_fun_tp(Fun_name, _Arg_lst) when (Fun_name == is_atom)     or (Fun_name
 	{boolean, []}.
 
 
-infer_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars) ->
+infer_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, Call_stack) ->
 	case lists:member(Fun_name, ?BIFs) of
 		true  -> infer_BIFs(Fun_name, Arg_lst_expr, Vars);
-		false -> infer_non_BIF_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars)
+		false -> infer_non_BIF_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, Call_stack)
 	end.
 
 
@@ -225,8 +229,8 @@ infer_anonymus_fun_tp(Var_name, Arg_lst_expr, Vars) ->
 	case find_var_by_name(Var_name, Vars) of
 		{variable, _Var_name}         -> infer_anon_func_app_without_body(Arg_lst_expr, Vars);
 		{Var_name, [{fun_expr, _}]}   -> infer_anon_func_app(Var_name, Arg_lst_expr, Vars);
-		{Var_name, [{implicit_fun, {{current_mod, Mod_name}, Fun_name, _Arity}}]}  -> infer_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars);
-		{Var_name, [{implicit_fun, {{external_mod, Mod_name}, Fun_name, _Arity}}]} -> infer_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars);
+		{Var_name, [{implicit_fun, {{current_mod, Mod_name}, Fun_name, _Arity}}]}  -> infer_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, []);
+		{Var_name, [{implicit_fun, {{external_mod, Mod_name}, Fun_name, _Arity}}]} -> infer_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, []);
 		_                           -> {none, []}
 	end.
 
@@ -234,7 +238,7 @@ infer_anonymus_fun_tp(Var_name, Arg_lst_expr, Vars) ->
 infer_anon_func_app_without_body(Arg_lst_expr, _Vars) ->
 	Arg_lst_children = ?Query:exec(Arg_lst_expr, ?Expr:children()),
 	Fun = 
-		fun(Arg) -> {Tp, _} = infer_expr_tp(Arg, []),
+		fun(Arg) -> {Tp, _} = infer_expr_tp(Arg, [], []),
 	 				Tp 
 	end,
 
@@ -245,19 +249,19 @@ infer_anon_func_app_without_body(Arg_lst_expr, _Vars) ->
 infer_anon_func_app(Var_name, Arg_lst_expr, Vars) ->
 	{_Var_name, [{fun_expr, Fun_expr}]} = find_var_by_name(Var_name, Vars),
 	Arg_list_children = ?Query:exec(Arg_lst_expr, ?Expr:children()),
-	Fun = fun(Arg) -> {Tp, _} = infer_expr_tp(Arg, Vars),
+	Fun = fun(Arg) -> {Tp, _} = infer_expr_tp(Arg, Vars, []),
 				      Tp 
 	end,
 
-	Arg_list = lists:map(Fun, Arg_list_children),
+	Arg_lst = lists:map(Fun, Arg_list_children),
 
 	Clause = ?Query:exec(Fun_expr, ?Expr:clauses()),
 	Patterns = ?Query:exec(Clause, ?Clause:patterns()),
-	[Fun_expr_vars] = replace_clauses_params_with_args([Patterns], Arg_list),
+	[Fun_expr_vars] = replace_clauses_params_with_args([Patterns], Arg_lst),
 
 	New_var_list = replace_shadowed_vars_vals(Fun_expr_vars, Vars),
 	
-	get_clause_type(Clause, New_var_list).
+	get_clause_type(Clause, New_var_list, []).
 
 
 replace_shadowed_vars_vals([], Vars) -> Vars;
@@ -274,21 +278,21 @@ replace_shadowed_vars_val(Anon_fun_var, [Var | Vars], New_var_list) ->
 	replace_shadowed_vars_val(Anon_fun_var, Vars, [Var | New_var_list]).
 
 
-infer_non_BIF_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars) ->
+infer_non_BIF_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, Call_stack) ->
 	Arg_lst = ?Query:exec(Arg_lst_expr, ?Expr:children()),
 	Arity = length(Arg_lst),
 	Spec_info = spec_proc:get_spec_type(Mod_name, Fun_name, Arity),
 
 	case Spec_info of
 		{_, [Return_type]} -> Return_type;
-		[] -> infer_non_BIF_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars)
+		[] -> infer_non_BIF_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, Call_stack)
 	end.
 
 
-infer_non_BIF_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Parent_fun_vars) ->
+infer_non_BIF_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Parent_fun_vars, Call_stack) ->
 	Arg_lst_children = ?Query:exec(Arg_lst_expr, ?Expr:children()),
 
-	Fun = fun(Arg) -> {Tp, _} = infer_expr_tp(Arg, Parent_fun_vars),
+	Fun = fun(Arg) -> {Tp, _} = infer_expr_tp(Arg, Parent_fun_vars, Call_stack),
 		              Tp
 	end,
 
@@ -298,11 +302,14 @@ infer_non_BIF_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Parent_fun_vars)
 	Actual_clauses = lists:map(fun({Clause, _}) -> Clause end, Clauses_vars_pair),
 	Vars = lists:map(fun({_, Var}) -> Var end, Clauses_vars_pair),
 
-	Fun_tp = get_clauses_type(Actual_clauses, Vars),
+	case Call_stack of
+		[{Mod_name, Fun_name, Arity} | _] -> {none, []};
+		_                                 -> Fun_tp = get_clauses_type(Actual_clauses, Vars, [{Mod_name, Fun_name, Arity} | Call_stack]),
 
-	case length(Fun_tp) of
-		1 -> hd(Fun_tp);
-		_ -> {union, Fun_tp}
+											case length(Fun_tp) of
+												1 -> hd(Fun_tp);
+												_ -> {union, Fun_tp}
+											end
 	end.
 
 
@@ -317,49 +324,49 @@ replace_clause_params_with_args([Par | Pars], [Arg | Args], Vars) ->
 	case ?Expr:type(Par) of
 		variable -> {_New_var, Upd_vars} = bound_var(?Expr:value(Par), Arg, Vars), 
 		            replace_clause_params_with_args(Pars, Args, Upd_vars);
-		cons     -> {Ls_cons_in_cf, Upd_vars} = construct_and_convert_cons_to_cf(Par, Vars),
+		cons     -> {Ls_cons_in_cf, Upd_vars} = construct_and_convert_cons_to_cf(Par, Vars, []),
 					{_Expr_tp, Upd_vars2} = bound_cons_vars(Ls_cons_in_cf, Arg, Upd_vars),
 					replace_clause_params_with_args(Pars, Args, Upd_vars2);
-		tuple    -> {Ls_tuple_in_cf, Upd_vars} = construct_and_convert_tuple_to_cf(Par, Vars),
+		tuple    -> {Ls_tuple_in_cf, Upd_vars} = construct_and_convert_tuple_to_cf(Par, Vars, []),
 					{_Expr_tp, Upd_vars2} = bound_tuple_vars(Ls_tuple_in_cf, Arg, Arg, Upd_vars),
 					replace_clause_params_with_args(Pars, Args, Upd_vars2);
 		_Other   -> replace_clause_params_with_args(Pars, Args, Vars)	
 	end.
 
 
-infer_parenthesis_inf(Expr, Vars) ->
+infer_parenthesis_inf(Expr, Vars, Call_stack) ->
 	[Child] = get_children(Expr),
-	infer_expr_tp(Child, Vars).
+	infer_expr_tp(Child, Vars, Call_stack).
 
 
-infer_match_expr_inf(Expr, Vars) ->
+infer_match_expr_inf(Expr, Vars, Call_stack) ->
 	[Ls_expr, Rs_expr] = get_children(Expr),
 
 	case ?Expr:type(Ls_expr) of
-		variable   -> bound_var_expr(Ls_expr, Rs_expr, Vars);
-		cons       -> bound_cons(Ls_expr, Rs_expr, Vars);
-		tuple      -> bound_tuple(Ls_expr, Rs_expr, Vars);
-		_Simple_tp -> match_simple_tp_expr(Ls_expr, Rs_expr, Vars)
+		variable   -> bound_var_expr(Ls_expr, Rs_expr, Vars, Call_stack);
+		cons       -> bound_cons(Ls_expr, Rs_expr, Vars, Call_stack);
+		tuple      -> bound_tuple(Ls_expr, Rs_expr, Vars, Call_stack);
+		_Simple_tp -> match_simple_tp_expr(Ls_expr, Rs_expr, Vars, Call_stack)
 	end.
 
 
-match_simple_tp_expr(Ls_expr, Rs_expr, Vars) ->
+match_simple_tp_expr(Ls_expr, Rs_expr, Vars, Call_stack) ->
 	case ?Expr:type(Rs_expr) of
 		variable -> Var_name = ?Expr:value(Rs_expr),
 					case is_bounded(Var_name, Vars) of
-						true  -> infer_expr_tp(Ls_expr, Vars);
-						false -> {Ls_expr_tp, Upd_vars} = infer_expr_tp(Ls_expr, Vars),
+						true  -> infer_expr_tp(Ls_expr, Vars, Call_stack);
+						false -> {Ls_expr_tp, Upd_vars} = infer_expr_tp(Ls_expr, Vars, Call_stack),
 								 New_var = {?Expr:value(Rs_expr), [Ls_expr_tp]},
 								 {Ls_expr_tp, [New_var | Upd_vars]}
 					end;
-		_        -> {Ls_expr_tp, Upd_vars} = infer_expr_tp(Ls_expr, Vars),
-					{_Rs_expr_tp, Upd_vars2} = infer_expr_tp(Rs_expr, Upd_vars),
+		_        -> {Ls_expr_tp, Upd_vars} = infer_expr_tp(Ls_expr, Vars, Call_stack),
+					{_Rs_expr_tp, Upd_vars2} = infer_expr_tp(Rs_expr, Upd_vars, Call_stack),
 					{Ls_expr_tp, Upd_vars2}
 	end.
 		           
-bound_tuple(Ls_tuple, Rs_tuple, Vars) ->
-	{Ls_tuple_tp, Upd_vars} = construct_and_convert_tuple_to_cf(Ls_tuple, Vars),
-	{Rs_tuple_gen_tp, Upd_vars2} = infer_expr_tp(Rs_tuple, Upd_vars),
+bound_tuple(Ls_tuple, Rs_tuple, Vars, Call_stack) ->
+	{Ls_tuple_tp, Upd_vars} = construct_and_convert_tuple_to_cf(Ls_tuple, Vars, Call_stack),
+	{Rs_tuple_gen_tp, Upd_vars2} = infer_expr_tp(Rs_tuple, Upd_vars, Call_stack),
 	bound_tuple_vars(Ls_tuple_tp, Rs_tuple_gen_tp, Rs_tuple_gen_tp, Upd_vars2).
 
 
@@ -383,13 +390,13 @@ bound_tuple_vars({ungen_tuple, [_Ls_elem | Ls_elems]}, {tuple, [_Rs_elem | Rs_el
 	bound_tuple_vars({ungen_tuple, Ls_elems}, {tuple, Rs_elems}, Match_expr_tp, Vars).
 
 
-bound_var_expr(Ls_expr, Rs_expr, Vars) ->
+bound_var_expr(Ls_expr, Rs_expr, Vars, Call_stack) ->
 	Var_name = ?Expr:value(Ls_expr),
 	Is_bounded = is_bounded(Var_name, Vars),
 
 	case Is_bounded of
-		true  -> infer_expr_tp(Ls_expr, Vars);
-		false -> {Rs_expr_tp, Upd_vars} = infer_expr_tp(Rs_expr, Vars),
+		true  -> infer_expr_tp(Ls_expr, Vars, Call_stack);
+		false -> {Rs_expr_tp, Upd_vars} = infer_expr_tp(Rs_expr, Vars, Call_stack),
 		         bound_var(Var_name, Rs_expr_tp, Upd_vars)
 	end.
 
@@ -422,9 +429,9 @@ find_tuple_among_elems([_Elem | Elems], Size) ->
 	find_tuple_among_elems(Elems, Size).
 
 
-bound_cons(Ls_expr, Rs_expr, Vars) ->
-	{Ls_cons_tp, Upd_vars} = construct_and_convert_cons_to_cf(Ls_expr, Vars),
-	{Rs_cons_tp, Upd_vars2} = infer_expr_tp(Rs_expr, Upd_vars),
+bound_cons(Ls_expr, Rs_expr, Vars, Call_stack) ->
+	{Ls_cons_tp, Upd_vars} = construct_and_convert_cons_to_cf(Ls_expr, Vars, Call_stack),
+	{Rs_cons_tp, Upd_vars2} = infer_expr_tp(Rs_expr, Upd_vars, Call_stack),
 	bound_cons_vars(Ls_cons_tp, Rs_cons_tp, Upd_vars2).
 
 
@@ -960,16 +967,16 @@ generalize_lst_tp(nonempty_list, nonempty_improper_list) ->
 	nonempty_maybe_improper_list.
 
 
-infer_infix_expr_type(Expr, Operation, Vars) ->
+infer_infix_expr_type(Expr, Operation, Vars, Call_stack) ->
 	[Sub_expr1, Sub_expr2] = get_children(Expr),
-	{Expr_inf1, Upd_vars} = infer_expr_tp(Sub_expr1, Vars),
-	{Expr_inf2, _Upd_vars2} = infer_expr_tp(Sub_expr2, Upd_vars),
+	{Expr_inf1, Upd_vars} = infer_expr_tp(Sub_expr1, Vars, Call_stack),
+	{Expr_inf2, _Upd_vars2} = infer_expr_tp(Sub_expr2, Upd_vars, Call_stack),
 %Добавить проверку на правильность типа	
 	compute_infix_expr(Expr_inf1, Expr_inf2, Operation).
 
-infer_prefix_expr_type(Expr, Operation, Vars) ->
+infer_prefix_expr_type(Expr, Operation, Vars, Call_stack) ->
 	[Sub_expr] = ?Query:exec(Expr, ?Expr:children()),
-	{Sub_expr_inf, _Upd_vars} = infer_expr_tp(Sub_expr, Vars),
+	{Sub_expr_inf, _Upd_vars} = infer_expr_tp(Sub_expr, Vars, Call_stack),
 	compute_prefix_expr(Sub_expr_inf, Operation).
 
 compute_prefix_expr({union, Union_elems}, Operation) -> 
@@ -1364,7 +1371,7 @@ filter_clauses([Pat_expr | Pat_exprs], Pars, [Guard | Guards]) ->
 filter_clause_by_guards([], _Vars) ->
 	true;
 filter_clause_by_guards(Guard, Vars) -> 
-	{Is_guard_matched, _Upd_vars} = infer_expr_tp(Guard, Vars),
+	{Is_guard_matched, _Upd_vars} = infer_expr_tp(Guard, Vars, []),
 
 	case Is_guard_matched of
 		{boolean, [true]}  -> true;
@@ -1395,7 +1402,7 @@ obtain_clauses_guards([Clause | Clauses]) ->
 
 obtain_pats_tp([], _Vars) -> [];
 obtain_pats_tp([Pat_expr | Pat_exprs], Vars) ->
-	{Pat, _Upd_vars} = infer_expr_tp(Pat_expr, Vars),	
+	{Pat, _Upd_vars} = infer_expr_tp(Pat_expr, Vars, []),	
 	[Pat | obtain_pats_tp(Pat_exprs, Vars)].	  
 
 is_union_match({union, []}, _Elem2) ->
@@ -1557,10 +1564,10 @@ are_matching_lists({_Lst_tp1, [Elems1]}, {_Lst_tp2, [Elems2]}) ->
     are_matching_types(Elems1, Elems2).
 
 
-extract_expr_vals([], Vars) -> {[], Vars};
-extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Vars) ->
-	{Left_cons_expr_list, Upd_vars} = extract_expr_val(Left_cons_expr, Vars),
-	{Right_cons_expr_list, Upd_vars2} = extract_expr_val(Right_cons_expr, Upd_vars),
+extract_expr_vals([], Vars, _Call_stack) -> {[], Vars};
+extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Vars, Call_stack) ->
+	{Left_cons_expr_list, Upd_vars} = extract_expr_val(Left_cons_expr, Vars, Call_stack),
+	{Right_cons_expr_list, Upd_vars2} = extract_expr_val(Right_cons_expr, Upd_vars, Call_stack),
 
 	Cons = 
 	case Right_cons_expr_list of
@@ -1570,35 +1577,35 @@ extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Vars) ->
 	end,
 
 	{Cons, Upd_vars2};
-extract_expr_vals([Expr | Exprs], Vars) ->
+extract_expr_vals([Expr | Exprs], Vars, Call_stack) ->
 
 	case ?Expr:type(Expr) of 
-		cons   -> {Cons, Upd_vars} = construct_list_from_cons_expr(Expr, Vars),
-				  {Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars),
+		cons   -> {Cons, Upd_vars} = construct_list_from_cons_expr(Expr, Vars, Call_stack),
+				  {Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars, Call_stack),
 				  {[Cons | Vals], Upd_vars2};
-		list   -> {Cons, Upd_vars} = construct_list_from_list_expr(Expr, Vars), 
-				  {Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars),
+		list   -> {Cons, Upd_vars} = construct_list_from_list_expr(Expr, Vars, Call_stack), 
+				  {Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars, Call_stack),
 				  {Cons ++ Vals, Upd_vars2};
-		tuple  -> {Tuple, Upd_vars} = construct_tuple(Expr, Vars), 
-				  {Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars),
+		tuple  -> {Tuple, Upd_vars} = construct_tuple(Expr, Vars, Call_stack), 
+				  {Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars, Call_stack),
 				  {[Tuple | Vals], Upd_vars2};
 		variable  -> Var_name = ?Expr:value(Expr),
 					Var = obtain_var_val(Var_name, Vars),
-					{Vals, Upd_vars2} = extract_expr_vals(Exprs, Vars),
+					{Vals, Upd_vars2} = extract_expr_vals(Exprs, Vars, Call_stack),
 		            {[Var | Vals], Upd_vars2};
-		_        -> {Gen_expr_tp, Upd_vars} = infer_expr_tp(Expr, Vars), 
-					{Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars),
+		_        -> {Gen_expr_tp, Upd_vars} = infer_expr_tp(Expr, Vars, Call_stack), 
+					{Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars, Call_stack),
 					{[Gen_expr_tp | Vals], Upd_vars2}		
 	end.
 
-extract_expr_val(Expr, Vars) ->
+extract_expr_val(Expr, Vars, Call_stack) ->
 	case ?Expr:type(Expr) of
-		cons     -> construct_list_from_cons_expr(Expr, Vars);
-		list     -> construct_list_from_list_expr(Expr, Vars);
-		tuple    -> construct_tuple(Expr, Vars);
+		cons     -> construct_list_from_cons_expr(Expr, Vars, Call_stack);
+		list     -> construct_list_from_list_expr(Expr, Vars, Call_stack);
+		tuple    -> construct_tuple(Expr, Vars, Call_stack);
 		variable -> Var_name = ?Expr:value(Expr),
 					{obtain_var_val(Var_name, Vars), Vars};
-		_        -> infer_expr_tp(Expr, Vars)
+		_        -> infer_expr_tp(Expr, Vars, Call_stack)
 	end.
 
 obtain_var_val(Var_name, Vars) ->
@@ -1609,27 +1616,27 @@ obtain_var_val(Var_name, Vars) ->
 		{Var_name, [Value]}  -> Value
 	end.
 
-construct_tuple([], _Vars) -> [];
-construct_tuple(Tuple, Vars) ->
+construct_tuple([], _Vars, _Call_stack) -> [];
+construct_tuple(Tuple, Vars, Call_stack) ->
 	Children = ?Query:exec(Tuple, ?Expr:children()),
-	{Tuple_elems_in_lst, Upd_vars} = extract_expr_vals(Children, Vars),
+	{Tuple_elems_in_lst, Upd_vars} = extract_expr_vals(Children, Vars, Call_stack),
 	{list_to_tuple(Tuple_elems_in_lst), Upd_vars}.
 
 
-construct_list_from_cons_expr(Cons, Vars) ->
+construct_list_from_cons_expr(Cons, Vars, Call_stack) ->
 	Children = ?Query:exec(Cons, ?Expr:children()),
 
 	case length(Children) of
 		0 -> {{empty_list, []}, Vars};
-		1 -> extract_expr_vals(Children, Vars);
+		1 -> extract_expr_vals(Children, Vars, Call_stack);
 		2 -> [Left_cons_expr, Right_cons_expr] = Children,
-			 extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Vars)
+			 extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Vars, Call_stack)
 	end.
 
-construct_list_from_list_expr([], _Vars) -> [];
-construct_list_from_list_expr(L, Vars) ->
+construct_list_from_list_expr([], _Vars, _Call_stack) -> [];
+construct_list_from_list_expr(L, Vars, Call_stack) ->
 	Children = ?Query:exec(L, ?Expr:children()),
-	extract_expr_vals(Children, Vars).
+	extract_expr_vals(Children, Vars, Call_stack).
 
 %--------------------Extraction of a function specification from the typer result--------------------------------------
 extract_matches([]) -> [];
@@ -2278,7 +2285,7 @@ i(Mod_name, Fun_name, Arity) ->
 
 %--------------------------------Testing------------------------------------------
 print_expr_val(Expr) ->
-	Actual_vals = extract_expr_vals([Expr], []),
+	Actual_vals = extract_expr_vals([Expr], [], []),
 
 	case ?Expr:type() of
 		tuple -> erlang:list_to_tuple(Actual_vals);
@@ -2388,8 +2395,8 @@ compare_tuples(T1, T2) ->
 	end.
 
 compare_cons(Con1, Con2) ->
-	List_elems1 = construct_list_from_cons_expr(Con1, []),
-	List_elems2 = construct_list_from_cons_expr(Con2, []),
+	List_elems1 = construct_list_from_cons_expr(Con1, [], []),
+	List_elems2 = construct_list_from_cons_expr(Con2, [], []),
 
 	compare_lists_elems(List_elems1, List_elems2, true).
 
