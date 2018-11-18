@@ -67,27 +67,40 @@ infer_fun_type(Mod_name, Fun_name, Arity, Variables) ->
 		_ -> {union, Clauses_types}
 	end.
 
+
 get_clause_type(Clause, Variables, Call_stack) ->
 	Bodies = get_bodies(Clause),
+
 	define_bodies_type(Bodies, Variables, Call_stack).
 
-get_clauses_type([], [], _Call_stack) -> [];
-get_clauses_type([Clause | Clauses], [Clause_vars | All_vars], Call_stack) ->
-	[get_clause_type(Clause, Clause_vars, Call_stack) | get_clauses_type(Clauses, All_vars, Call_stack)].
+
+get_clauses_type([], [], _Call_stack, Res) -> 
+	{Clauses_gen_tp, _} = generalize_elems(Res, []),
+	[Clauses_gen_tp];
+get_clauses_type([Clause | Clauses], [Clause_vars | All_vars], Call_stack, Res) ->
+	Clause_tp = get_clause_type(Clause, Clause_vars, Call_stack),
+
+	case Clause_tp of
+		[] -> get_clauses_type(Clauses, All_vars, Call_stack, Res);
+	    _  -> get_clauses_type(Clauses, All_vars, Call_stack, [Clause_tp | Res])
+	end.
+
 
 define_bodies_type([], _, _Call_stack) -> [];
 define_bodies_type([Last_body], Vars, Call_stack) ->
 	{Clause_type, _Upd_vars} = infer_expr_tp(Last_body, Vars, Call_stack),
-	Clause_type;
+
+	case Clause_type of
+		{none, []} -> [];
+		_          -> Clause_type
+	end;
 define_bodies_type([Body | Bodies], Vars, Call_stack) ->
 	{Body_type, Upd_vars} = infer_expr_tp(Body, Vars, Call_stack),
-
 	case Body_type of
 		{none, []} -> [];
-	    _          -> define_bodies_type(Bodies, Upd_vars, Call_stack)
-	end.
-
-
+		_          -> define_bodies_type(Bodies, Upd_vars, Call_stack)
+	end.         
+	
 
 %---------------------------------Inference part-----------------------------------------------
 
@@ -107,6 +120,7 @@ infer_expr_tp(Expr, Vars, Call_stack) ->
 		_Simple_type    -> {infer_simple_type(Expr), Vars}
 	end.
 
+
 infer_implicit_fun_expr(Implicit_fun_expr, _Vars) ->
 	[Fun_info_expr, Arity_expr] = ?Query:exec(Implicit_fun_expr, ?Expr:children()),
 
@@ -117,6 +131,7 @@ infer_implicit_fun_expr(Implicit_fun_expr, _Vars) ->
 				[Fun_mod] = ?Query:exec(Function, ?Fun:module()),
 				{implicit_fun, {{current_mod, ?Mod:name(Fun_mod)}, ?Expr:value(Fun_info_expr), ?Expr:value(Arity_expr)}}
 	end.
+
 
 infer_var_type(Var_expr, Vars) ->
 	Var = find_var_by_name(?Expr:value(Var_expr), Vars),	
@@ -133,20 +148,26 @@ infer_simple_type(Expr) ->
 		_     -> {?Expr:type(Expr), [?Expr:value(Expr)]}
 	end.
 
+
 construct_and_convert_cons_to_cf(Cons_expr, Vars, Call_stack) ->
 	{Lst, Upd_vars} = construct_list_from_cons_expr(Cons_expr, Vars, Call_stack),
+	%erlang:display(Lst),
 	{convert_value_in_basic_format_to_compound(Lst), Upd_vars}.
+
 
 infer_cons_expr_type(Cons_expr, Vars, Call_stack) ->
 	{Lst_in_cf, Upd_vars} = construct_and_convert_cons_to_cf(Cons_expr, Vars, Call_stack),
 	{generalize_term(Lst_in_cf, []), Upd_vars}.
 
+
 construct_and_convert_tuple_to_cf(Tuple_expr, Vars, Call_stack) ->
 	{Tuple, Upd_vars} = construct_tuple(Tuple_expr, Vars, Call_stack),
 	{convert_value_in_basic_format_to_compound(Tuple), Upd_vars}.
 
+
 infer_tuple_expr_type(Tuple_expr, Vars, Call_stack) ->
 	{Tuple_in_cf, Upd_vars} = construct_and_convert_tuple_to_cf(Tuple_expr, Vars, Call_stack),
+	%erlang:display(Tuple_in_cf),
 	{generalize_term(Tuple_in_cf, []), Upd_vars}.
 
 
@@ -154,9 +175,10 @@ infer_fun_app_type(Fun_app_expr, Vars, Call_stack) ->
 	[Fun_info_expr, Arg_lst_expr] = ?Query:exec(Fun_app_expr, ?Expr:children()),
 
 	case ?Expr:type(Fun_info_expr) of 
-			variable -> infer_anonymus_fun_tp(?Expr:value(Fun_info_expr), Arg_lst_expr, Vars);
+			variable -> infer_anonymus_fun_tp(?Expr:value(Fun_info_expr), Arg_lst_expr, Vars, Call_stack);
 			_        ->	infer_fun_tp(Fun_app_expr, Fun_info_expr, Arg_lst_expr, Vars, Call_stack)
 	end.
+
 
 infer_fun_tp(Fun_app_expr, Fun_info_expr, Arg_lst_expr, Vars, Call_stack) ->
 	case ?Expr:value(Fun_info_expr) of
@@ -169,6 +191,7 @@ infer_fun_tp(Fun_app_expr, Fun_info_expr, Arg_lst_expr, Vars, Call_stack) ->
 		            Mod_name = ?Mod:name(Fun_mod_expr),
 		            infer_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, Call_stack)
 	end.
+
 
 infer_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, Call_stack) ->
 	case Mod_name of
@@ -197,7 +220,9 @@ infer_BIF_fun_tp(Fun_name, _Arg_lst) when (Fun_name == is_atom)     or (Fun_name
 		                              or (Fun_name == is_pid)       or (Fun_name == is_port)
 		                              or (Fun_name == is_record)    or (Fun_name == is_reference)
 		                              or (Fun_name == is_tuple) ->
-	{boolean, []}.
+	{boolean, []};
+infer_BIF_fun_tp(tuple_to_list, _Arg_lst) ->
+	{list, [{any, []}]}.
 
 
 infer_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, Call_stack) ->
@@ -207,8 +232,8 @@ infer_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, Call_stack) ->
 	end.
 
 
-find_var_by_name(Required_var_Name, Variables) ->
-	Res = lists:filter(fun({Var_name, _}) -> Required_var_Name == Var_name end, Variables),
+find_var_by_name(Required_var_Name, Vars) ->
+	Res = lists:filter(fun({Var_name, _}) -> Required_var_Name == Var_name end, Vars),
 
 	case Res of
 		[]    -> {variable, [Required_var_Name]};
@@ -225,13 +250,13 @@ is_bounded(Var_name, Vars) ->
 	end.
 
 
-infer_anonymus_fun_tp(Var_name, Arg_lst_expr, Vars) ->
+infer_anonymus_fun_tp(Var_name, Arg_lst_expr, Vars, Call_stack) ->
 	case find_var_by_name(Var_name, Vars) of
 		{variable, _Var_name}         -> infer_anon_func_app_without_body(Arg_lst_expr, Vars);
 		{Var_name, [{fun_expr, _}]}   -> infer_anon_func_app(Var_name, Arg_lst_expr, Vars);
-		{Var_name, [{implicit_fun, {{current_mod, Mod_name}, Fun_name, _Arity}}]}  -> infer_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, []);
-		{Var_name, [{implicit_fun, {{external_mod, Mod_name}, Fun_name, _Arity}}]} -> infer_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, []);
-		_                           -> {none, []}
+		{Var_name, [{implicit_fun, {{current_mod, Mod_name}, Fun_name, _Arity}}]}  -> infer_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, Call_stack);
+		{Var_name, [{implicit_fun, {{external_mod, Mod_name}, Fun_name, _Arity}}]} -> infer_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, Call_stack);
+		_                             -> {none, []}
 	end.
 
 
@@ -282,9 +307,8 @@ infer_non_BIF_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, Call_stack
 	Arg_lst = ?Query:exec(Arg_lst_expr, ?Expr:children()),
 	Arity = length(Arg_lst),
 	Spec_info = spec_proc:get_spec_type(Mod_name, Fun_name, Arity),
-
 	case Spec_info of
-		{_, [Return_type]} -> Return_type;
+		[Return_type] -> Return_type;
 		[] -> infer_non_BIF_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, Call_stack)
 	end.
 
@@ -301,15 +325,22 @@ infer_non_BIF_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Parent_fun_vars,
 	Clauses_vars_pair = find_actual_clauses(Mod_name, Fun_name, Arity, Arg_lst),
 	Actual_clauses = lists:map(fun({Clause, _}) -> Clause end, Clauses_vars_pair),
 	Vars = lists:map(fun({_, Var}) -> Var end, Clauses_vars_pair),
+	%erlang:display(Call_stack),
+	%erlang:display({Mod_name, Fun_name, Arity}),
+	%erlang:display(Vars),
 
-	case Call_stack of
-		[{Mod_name, Fun_name, Arity} | _] -> {none, []};
-		_                                 -> Fun_tp = get_clauses_type(Actual_clauses, Vars, [{Mod_name, Fun_name, Arity} | Call_stack]),
+	%erlang:display("-----------------------------"),
+	Is_recursive_fun = {Mod_name, Fun_name, Arity} == hd(Call_stack),
+	Is_call_stack_member = lists:member({Mod_name, Fun_name, Arity}, Call_stack),
 
-											case length(Fun_tp) of
-												1 -> hd(Fun_tp);
-												_ -> {union, Fun_tp}
-											end
+	case Is_recursive_fun or Is_call_stack_member of
+		true  -> {none, []};
+		false -> Fun_tp = get_clauses_type(Actual_clauses, Vars, [{Mod_name, Fun_name, Arity} | Call_stack], []),
+
+			    case length(Fun_tp) of
+				    1 -> hd(Fun_tp);
+				    _ -> {union, Fun_tp}
+			    end
 	end.
 
 
@@ -322,8 +353,9 @@ replace_clauses_params_with_args([Pat | Pats], Args) ->
 replace_clause_params_with_args([], [], Vars) -> Vars;
 replace_clause_params_with_args([Par | Pars], [Arg | Args], Vars) ->
 	case ?Expr:type(Par) of
-		variable -> {_New_var, Upd_vars} = bound_var(?Expr:value(Par), Arg, Vars), 
-		            replace_clause_params_with_args(Pars, Args, Upd_vars);
+		variable -> Var_name = ?Expr:value(Par),
+					New_var = {Var_name, [Arg]},
+		            replace_clause_params_with_args(Pars, Args, [New_var | Vars]);
 		cons     -> {Ls_cons_in_cf, Upd_vars} = construct_and_convert_cons_to_cf(Par, Vars, []),
 					{_Expr_tp, Upd_vars2} = bound_cons_vars(Ls_cons_in_cf, Arg, Upd_vars),
 					replace_clause_params_with_args(Pars, Args, Upd_vars2);
@@ -353,12 +385,7 @@ infer_match_expr_inf(Expr, Vars, Call_stack) ->
 match_simple_tp_expr(Ls_expr, Rs_expr, Vars, Call_stack) ->
 	case ?Expr:type(Rs_expr) of
 		variable -> Var_name = ?Expr:value(Rs_expr),
-					case is_bounded(Var_name, Vars) of
-						true  -> infer_expr_tp(Ls_expr, Vars, Call_stack);
-						false -> {Ls_expr_tp, Upd_vars} = infer_expr_tp(Ls_expr, Vars, Call_stack),
-								 New_var = {?Expr:value(Rs_expr), [Ls_expr_tp]},
-								 {Ls_expr_tp, [New_var | Upd_vars]}
-					end;
+		            bound_var_expr(Rs_expr, Ls_expr, Vars, Call_stack);
 		_        -> {Ls_expr_tp, Upd_vars} = infer_expr_tp(Ls_expr, Vars, Call_stack),
 					{_Rs_expr_tp, Upd_vars2} = infer_expr_tp(Rs_expr, Upd_vars, Call_stack),
 					{Ls_expr_tp, Upd_vars2}
@@ -375,11 +402,8 @@ bound_tuple_vars({ungen_tuple, []}, {tuple, []}, Match_expr_tp, Vars) ->
 bound_tuple_vars(_Ls_tuple, {any, []}, _Match_expr_tp, Vars) ->
 	{{any, []}, Vars};
 bound_tuple_vars({ungen_tuple, [{variable, [Var_name]} | Ls_elems]}, {tuple, [Rs_elem | Rs_elems]}, Match_expr_tp, Vars) ->
-	case is_bounded(Var_name, Vars) of
-		true  -> bound_tuple_vars({ungen_tuple, Ls_elems}, {tuple, Rs_elems}, Match_expr_tp, Vars);
-		false -> New_var = {Var_name, [Rs_elem]},
-		         bound_tuple_vars({ungen_tuple, Ls_elems}, {tuple, Rs_elems}, Match_expr_tp, [New_var | Vars])
-	end;
+	{Rs_elem, Upd_vars} = bound_var_to_value(Var_name, Rs_elem, Vars), 
+    bound_tuple_vars({ungen_tuple, Ls_elems}, {tuple, Rs_elems}, Match_expr_tp, Upd_vars);
 bound_tuple_vars({ungen_tuple, [{ungen_list, Lst_elems} | Ls_elems]}, {tuple, [Rs_elem | Rs_elems]}, Match_expr_tp, Vars) -> 
 	{_Lst_tp, Upd_vars} = bound_cons_vars({ungen_list, Lst_elems}, Rs_elem, Vars),
 	bound_tuple_vars({ungen_tuple, Ls_elems}, {tuple, Rs_elems}, Match_expr_tp, Upd_vars);
@@ -392,18 +416,23 @@ bound_tuple_vars({ungen_tuple, [_Ls_elem | Ls_elems]}, {tuple, [_Rs_elem | Rs_el
 
 bound_var_expr(Ls_expr, Rs_expr, Vars, Call_stack) ->
 	Var_name = ?Expr:value(Ls_expr),
+	bound_var_to_expr_tp(Var_name, Rs_expr, Vars, Call_stack).
+
+
+bound_var_to_expr_tp(Var_name, Expr, Vars, Call_stack) ->
+	{Expr_tp, Upd_vars} = infer_expr_tp(Expr, Vars, Call_stack),
+	bound_var_to_value(Var_name, Expr_tp, Upd_vars).
+
+
+bound_var_to_value(Var_name, Value, Vars) ->
 	Is_bounded = is_bounded(Var_name, Vars),
 
 	case Is_bounded of
-		true  -> infer_expr_tp(Ls_expr, Vars, Call_stack);
-		false -> {Rs_expr_tp, Upd_vars} = infer_expr_tp(Rs_expr, Vars, Call_stack),
-		         bound_var(Var_name, Rs_expr_tp, Upd_vars)
+		true  -> Upd_vars2 = replace_shadowed_vars_val(Value, Vars, []),
+		         {Value, Upd_vars2};
+		false -> New_var = {Var_name, [Value]},
+		         {Value, [New_var | Vars]}
 	end.
-
-
-bound_var(Var_name, Rs_expr_tp, Vars) ->
-	New_var = {Var_name, [Rs_expr_tp]},
-	{Rs_expr_tp, [New_var | Vars]}.
 
 
 find_lst_among_elems([]) -> [];
@@ -452,16 +481,19 @@ bound_cons_vars({Lst_tp, [{ungen_list, Ls_lst_elems} | T]}, {Rs_lst_tp, Rs_lst_e
     {_Elem_tp, Upd_vars} = bound_cons_vars({ungen_list, Ls_lst_elems}, Rs_lst_elem, Vars),
     bound_cons_vars({Lst_tp, T}, {Rs_lst_tp, Rs_lst_elems}, Upd_vars);                                                                        
 bound_cons_vars({Lst_tp, [{variable, [Var_name]} | T]}, Rs_cons_tp, Vars) ->
+	New_var = bound_cons_var({Lst_tp, [{variable, [Var_name]}]}, Rs_cons_tp),
+
 	case is_bounded(Var_name, Vars) of
-		true  -> bound_cons_vars({Lst_tp, T}, Rs_cons_tp, Vars);
-		false -> New_var = bound_cons_var({Lst_tp, [{variable, [Var_name]}]}, Rs_cons_tp),
-		         bound_cons_vars({Lst_tp, T}, Rs_cons_tp, [New_var | Vars])
+		true  -> Upd_vars = replace_shadowed_vars_val(New_var, Vars, []),
+		         bound_cons_vars({Lst_tp, T}, Rs_cons_tp, Upd_vars);
+		false -> bound_cons_vars({Lst_tp, T}, Rs_cons_tp, [New_var | Vars])
 	end;
 bound_cons_vars(Rs_cons = {_Lst_tp, [{'...', [Var_name]}]}, Rs_cons_tp, Vars) ->
+	New_var = bound_cons_var(Rs_cons, Rs_cons_tp),
 	case is_bounded(Var_name, Vars) of
-		true  -> {Rs_cons_tp, Vars};
-		false -> New_var = bound_cons_var(Rs_cons, Rs_cons_tp),
-		         {Rs_cons_tp, [New_var | Vars]}
+		true  -> Upd_vars = replace_shadowed_vars_val(New_var, Vars, []),
+		         {Rs_cons_tp, Upd_vars};
+		false -> {Rs_cons_tp, [New_var | Vars]}
 	end;
 bound_cons_vars({_Lst_tp, {_Elem_tp, _Elem_Val}}, Rs_cons_tp, Vars) ->
 	{Rs_cons_tp, Vars};
@@ -529,8 +561,8 @@ convert_elems_tbl_to_internal_format([{_Label, []} | T], Res) ->
 convert_elems_tbl_to_internal_format([{tuples, Elems_tbl} | T], Res) ->
 	Tuples = generate_tuples_from_tuple_tbl({tuples, Elems_tbl}, []),
 	convert_elems_tbl_to_internal_format(T, [Tuples | Res]);
-convert_elems_tbl_to_internal_format([{lists, [Lst = {_Lst_tp, []}]} | T], Res) ->
-	convert_elems_tbl_to_internal_format(T, [[Lst | Res]]);
+convert_elems_tbl_to_internal_format([{lists, [{empty_list, Elems_tbl}]} | T], Res) ->
+	convert_elems_tbl_to_internal_format(T, [[{empty_list, []}] | Res]);
 convert_elems_tbl_to_internal_format([{lists, [{Lst_tp, Elems_tbl}]} | T], Res) ->
 	Elems_tbl_secs = tuple_to_list(Elems_tbl),
 	Lst = build_lst(Lst_tp, Elems_tbl_secs, []),
@@ -733,6 +765,7 @@ generalize_lst({Lst_tp, [{Elem_tp, Elem_val} | T]}, Elems_tbl) when ((Elem_tp ==
 	                                                                      or (Elem_tp == number)) ->
 	Upd_elems_tbl = upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?NUMS_SEC_INDEX),
 	generalize_lst({Lst_tp, T}, Upd_elems_tbl);
+
 generalize_lst({Lst_tp, [{Elem_tp, Elem_val} | T]}, Elems_tbl) when Elem_tp == atom ->
 	Upd_elems_tbl = upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?ATOMS_SEC_INDEX),
 	generalize_lst({Lst_tp, T}, Upd_elems_tbl);
@@ -742,10 +775,13 @@ generalize_lst({Lst_tp, [{Elem_tp, Elem_val} | T]}, Elems_tbl) when (Elem_tp == 
 																  or (Elem_tp == nonempty_maybe_improper_list) or (Elem_tp == list) ->																  														   
 	Upd_elems_tbl = upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?LISTS_SEC_INDEX),
 	generalize_lst({Lst_tp, T}, Upd_elems_tbl);
+generalize_lst({Lst_tp, [{Elem_tp, Elem_val} | T]}, Elems_tbl) when (Elem_tp == tuple) ->																  														   
+	Upd_elems_tbl = upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?TUPLES_SEC_INDEX),
+	generalize_lst({Lst_tp, T}, Upd_elems_tbl);
 generalize_lst(Lst = {Lst_tp, _Elems}, _Elems_tbl) when (Lst_tp == nonempty_list)
 											         or (Lst_tp == nonempty_improper_list) or (Lst_tp == maybe_improper_list)
 											         or (Lst_tp == nonempty_maybe_improper_list) or (Lst_tp == list) ->
-	Lst_sec = {lists, [{Lst_tp, ?ELEMS_TBL}]},																   
+	Lst_sec = {lists, [{Lst_tp, ?ELEMS_TBL}]},													   
 	{lists, [{Lst_tp, Upd_elems_tbl}]} = upd_lst_sec_with_gen_lst(Lst, Lst_sec),
 	{Lst, Upd_elems_tbl};
 generalize_lst({Lst_tp, [{Elem_tp, Elem_val} | T]}, Elems_tbl) when (Elem_tp == ungen_tuple) or (Elem_tp == tuple) -> 
@@ -918,8 +954,8 @@ build_lst(Lst_tp, [{_Label, []} | T], Res) ->
 build_lst(Lst_tp, [{tuples, Tuple_tbl} | T], Res) ->
 	Tuples = generate_tuples_from_tuple_tbl({tuples, Tuple_tbl}, []),
 	build_lst(Lst_tp, T, [Tuples | Res]);
-build_lst(Lst_tp, [{lists, [{Member_lst_tp, []}]} | T], Res) ->
-	build_lst(Lst_tp, T, [[{Member_lst_tp, []}] | Res]);
+build_lst(Lst_tp, [{lists, [{empty_list, Elems_tbl}]} | T], Res) ->
+	build_lst(Lst_tp, T, [[{empty_list, []}] | Res]);
 build_lst(Lst_tp, [{lists, [{Member_lst_tp, Elems_tbl}]} | T], Res) ->
 	Elems_tbl_secs = tuple_to_list(Elems_tbl),
 	Lst = build_lst(Member_lst_tp, Elems_tbl_secs, []),
@@ -979,6 +1015,8 @@ infer_prefix_expr_type(Expr, Operation, Vars, Call_stack) ->
 	{Sub_expr_inf, _Upd_vars} = infer_expr_tp(Sub_expr, Vars, Call_stack),
 	compute_prefix_expr(Sub_expr_inf, Operation).
 
+compute_prefix_expr({none, []}, _Operation) ->
+	{none, []};
 compute_prefix_expr({union, Union_elems}, Operation) -> 
 	{union, lists:map(fun(Expr1) -> compute_prefix_expr(Expr1, Operation) end, Union_elems)};
 compute_prefix_expr({boolean, []}, 'not') ->
@@ -1023,6 +1061,8 @@ compute_prefix_expr({Tp, []}, 'bnot') when (Tp == number) or (Tp == any) ->
 compute_prefix_expr({_Tp, _Val}, _Operation) ->
 	{none, []}.
 
+compute_infix_expr(Tp1, Tp2, _Operation) when (Tp1 == {none, []}) or (Tp2 == {none, []}) ->
+	{none, []};
 compute_infix_expr({union, Union_elems1}, {union, Union_elems2}, Operation) -> 
 	Two_unions_merged = [compute_infix_expr(Union_elem1, Union_elem2, Operation) || 
 							Union_elem1 <- Union_elems1, Union_elem2 <- Union_elems2],
@@ -1578,7 +1618,6 @@ extract_expr_vals([{left, Left_cons_expr}, {right, Right_cons_expr}], Vars, Call
 
 	{Cons, Upd_vars2};
 extract_expr_vals([Expr | Exprs], Vars, Call_stack) ->
-
 	case ?Expr:type(Expr) of 
 		cons   -> {Cons, Upd_vars} = construct_list_from_cons_expr(Expr, Vars, Call_stack),
 				  {Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars, Call_stack),
