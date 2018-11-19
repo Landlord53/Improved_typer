@@ -4,21 +4,24 @@
 -include("user.hrl").
 -include("spec.hrl").
 
+%1)В случаях, когда в возвращаемом значении есть значения типо {variable, [Var_name]} менять на {any, []}
+%2)Сделать поиск typexpr. Например -type memory_type() :: 'total' | 'processes' и заменять на настоящие значения
+
 get_spec_type(Module_name, Fun_name, Arity) ->
 	Mod = ?Query:exec(?Mod:find(Module_name)),
 	Spec = ?Query:exec(Mod, ?Spec:find(Fun_name, Arity)),
 
     case Spec of 
         [] -> [];
-        _  ->   Form = ?Query:exec(Spec, [{specdef, back}]),
-                %erlang:display(?Query:exec(Form, ?Expr:children())),
-                [_, Tattr2] = ?Query:exec(Form, [tattr]),
-                process_spec(Tattr2)
+        _  -> Form = ?Query:exec(Spec, [{specdef, back}]),
+              [_, Tattr2] = ?Query:exec(Form, [tattr]),
+              process_spec(Tattr2)
     end.
 
 process_spec(Spec) ->
     case ?Typexp:type(Spec) of
-        fun_sig    -> process_funsig(Spec);
+        fun_sig    -> {_Arg_lst, Return_val} = process_funsig(Spec),
+                      Return_val;
         spec_guard -> process_spec_guard(Spec);
         spec_union -> process_spec_union(Spec)
     end.
@@ -88,7 +91,7 @@ process_spec_guard(Tattr) ->
 		end,
 	Guard_types = get_spec_elems_type(Guard_children),
 	Guard_replaced_type = replace_type_vars(Guard_types, Guard_types),
-	Ret_type = process_funsig(Funsig),
+	{_Arg_lst, Ret_type} = process_funsig(Funsig),
 	Replaced_return_val = replace_noneguard_vars(Ret_type, Guard_replaced_type),
 	%Args_type = lists:map(fun({_Var_name, Type}) -> Type end, Replaced_args),
 	%Return_type = lists:map(fun({Var_name, Type}) -> Type end, Replaced_return_val),
@@ -99,7 +102,7 @@ process_spec_guard(Tattr) ->
 process_funsig(Funsig_expr) ->
 	[Arglist, Return] = ?Query:exec(Funsig_expr, ?Typexp:children()),
 	Args = ?Query:exec(Arglist, ?Typexp:children()),
-	get_spec_elems_type([Return]).
+	{get_spec_elems_type(Args), get_spec_elems_type([Return])}.
 	
 get_spec_elems_type([]) ->
 	[];
@@ -143,27 +146,32 @@ get_call_type(Call) ->
 	Children = ?Query:exec(Arg_list, ?Typexp:children()),
 
     case Children of
-        [] -> {?Typexp:tag(Type), []};
+        [] -> Tp = ?Typexp:tag(Type),
+              case Tp of
+                term -> {any, []};
+                _    -> {Tp, []}
+              end;
         _  -> [Elem_type] = get_spec_elems_type(Children),
               Elem_type
     end.
 
 get_list_type(List) ->
 	case ?Typexp:tag(List) of
-		empty        -> {list, [[]]};
+		empty        -> {empty_list, []};
 		any          -> Children = ?Query:exec(List, ?Typexp:children()),
-				 		{list, get_spec_elems_type(Children)};
+				 		{ungen_list, get_spec_elems_type(Children)};
 		nonempty     -> Children = ?Query:exec(List, ?Typexp:children()),
-				 		{list, get_spec_elems_type(Children) ++ ['...']}
+				 		{ungen_list, get_spec_elems_type(Children) ++ {['...'], ["Undefined"]}}
 	end.
 		
 get_tuple_type(Arg) ->
 	Children = ?Query:exec(Arg, ?Typexp:children()),
-	{tuple, get_spec_elems_type(Children)}.
+	{ungen_tuple, get_spec_elems_type(Children)}.
 
 get_paren_type(Arg) ->
 	Children = ?Query:exec(Arg, ?Typexp:children()),
-	{paren, get_spec_elems_type(Children)}.
+	[Paren_tp] = get_spec_elems_type(Children),
+    Paren_tp.
 
 get_simple_type(Elem) ->
     Tag = ?Typexp:tag(Elem),
@@ -190,7 +198,9 @@ get_literal_type(Elem) ->
 		_      -> case ?Typexp:tag(Elem) of
                     true  -> {boolean, [?Typexp:tag(Elem)]};
                     false -> {boolean, [?Typexp:tag(Elem)]};
-                    _     -> {?Typexp:type(Elem), [?Typexp:tag(Elem)]}
+                    _     -> A = {?Typexp:type(Elem), [?Typexp:tag(Elem)]},
+                             %erlang:display(A),
+                             A
                   end
 	end.
 

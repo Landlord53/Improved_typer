@@ -53,7 +53,7 @@
 				is_atom, is_binary, is_bitstring, is_boolean,
 				is_float ,is_function, is_integer, is_list, 
 				is_map, is_number, is_pid, is_port,
-				is_record, is_reference, is_tuple
+				is_record, is_reference, is_tuple, tuple_to_list
     ]).
 
 infer_fun_type(Mod_name, Fun_name, Arity, Variables) ->
@@ -75,8 +75,9 @@ get_clause_type(Clause, Variables, Call_stack) ->
 
 
 get_clauses_type([], [], _Call_stack, Res) -> 
-	{Clauses_gen_tp, _} = generalize_elems(Res, []),
-	[Clauses_gen_tp];
+	%{Clauses_gen_tp, _} = generalize_elems(Res, []),
+	%[Clauses_gen_tp];
+	Res;
 get_clauses_type([Clause | Clauses], [Clause_vars | All_vars], Call_stack, Res) ->
 	Clause_tp = get_clause_type(Clause, Clause_vars, Call_stack),
 
@@ -167,7 +168,6 @@ construct_and_convert_tuple_to_cf(Tuple_expr, Vars, Call_stack) ->
 
 infer_tuple_expr_type(Tuple_expr, Vars, Call_stack) ->
 	{Tuple_in_cf, Upd_vars} = construct_and_convert_tuple_to_cf(Tuple_expr, Vars, Call_stack),
-	%erlang:display(Tuple_in_cf),
 	{generalize_term(Tuple_in_cf, []), Upd_vars}.
 
 
@@ -307,8 +307,9 @@ infer_non_BIF_external_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, Call_stack
 	Arg_lst = ?Query:exec(Arg_lst_expr, ?Expr:children()),
 	Arity = length(Arg_lst),
 	Spec_info = spec_proc:get_spec_type(Mod_name, Fun_name, Arity),
+
 	case Spec_info of
-		[Return_type] -> Return_type;
+		[Return_type] -> generalize_term(Return_type, []);
 		[] -> infer_non_BIF_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, Call_stack)
 	end.
 
