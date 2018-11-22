@@ -81,10 +81,10 @@ get_clause_type(Clause, Variables, Call_stack) ->
 
 
 get_clauses_type([], [], _Call_stack, Res) -> 
-	{Clauses_gen_tp, _} = generalize_elems(Res, []),
+	%{Clauses_gen_tp, _} = generalize_elems(Res, []),
 	%erlang:display(Clauses_gen_tp),
-	[Clauses_gen_tp];
-	%Res;
+	%[Clauses_gen_tp];
+	Res;
 get_clauses_type([Clause | Clauses], [Clause_vars | All_vars], Call_stack, Res) ->
 	Clause_tp = get_clause_type(Clause, Clause_vars, Call_stack),
 
@@ -342,13 +342,7 @@ infer_non_BIF_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Parent_fun_vars,
 	Clauses_vars_pair = find_actual_clauses(Mod_name, Fun_name, Arity, Arg_lst),
 	Actual_clauses = lists:map(fun({Clause, _}) -> Clause end, Clauses_vars_pair),
 	Vars = lists:map(fun({_, Var}) -> Var end, Clauses_vars_pair),
-	%erlang:display(Call_stack),
-	%erlang:display({Mod_name, Fun_name, Arity}),
-	%erlang:display(Vars),
 
-	%erlang:display("-----------------------------"),
-	%erlang:display(Actual_clauses),
-	%erlang:display(Arg_lst),
 	{Root, Call_stack_funs} = Call_stack,
 	Prev_fun_sig = 
 		case Call_stack_funs of
@@ -358,18 +352,14 @@ infer_non_BIF_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Parent_fun_vars,
  
 	Is_recursive_fun = {Mod_name, Fun_name, Arity} == Prev_fun_sig,
 	Is_mutually_rec_funs = lists:member({Mod_name, Fun_name, Arity}, Call_stack_funs),
-	%erlang:display(Actual_clauses),
 
 	Fun_tp = 
 		case {Is_recursive_fun, Is_mutually_rec_funs} of
 			{true, false}  -> [{none, []}];
-			{true, true}   -> [{any, []}];
-			{false, true}  -> [{any, []}];
+			{_, true}      -> [{any, []}];
 			{false, false} -> Upd_call_stack = {Root, [{Mod_name, Fun_name, Arity} | Call_stack_funs]},
 			                  get_clauses_type(Actual_clauses, Vars, Upd_call_stack, [])
 		end,
-
-	%erlang:display(Fun_tp),
 
     case length(Fun_tp) of
 	    1 -> hd(Fun_tp);
