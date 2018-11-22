@@ -56,16 +56,22 @@
 				is_record, is_reference, is_tuple, tuple_to_list
     ]).
 
-infer_fun_type(Mod_name, Fun_name, Arity, Variables) ->
+infer_fun_type(Mod_name, Fun_name, Arity, []) ->
 	Fun_node = get_fun_node(Mod_name, Fun_name, Arity),
 	Fun_def = get_fundef(Fun_node),
 	Clauses = get_clauses(Fun_def),
-	Clauses_types = lists:map(fun(Clause) -> get_clause_type(Clause, Variables, [{Mod_name, Fun_name, Arity}]) end, Clauses),
+	Root = {{Mod_name, Fun_name, Arity}},
+	Clauses_num = length(Clauses),
+	Vars = lists:duplicate(Clauses_num, []),
+ 	get_clauses_type(Clauses, Vars, {Root, []}, []).
+	%Clauses_types = lists:map(fun(Clause) -> get_clause_type(Clause, Variables, {Root, []}) end, Clauses),
 
-	case length(Clauses_types) of
-		1 -> Clauses_types;
-		_ -> {union, Clauses_types}
-	end.
+	%{Gen_clauses_tp, _} = generalize_elems(Clauses_types, []),
+	%Gen_clauses_tp.
+%	case length(Clauses_types) of
+%		1 -> Clauses_types;
+%		_ -> {union, Clauses_types}
+%	end.
 
 
 get_clause_type(Clause, Variables, Call_stack) ->
@@ -75,9 +81,10 @@ get_clause_type(Clause, Variables, Call_stack) ->
 
 
 get_clauses_type([], [], _Call_stack, Res) -> 
-	%{Clauses_gen_tp, _} = generalize_elems(Res, []),
-	%[Clauses_gen_tp];
-	Res;
+	{Clauses_gen_tp, _} = generalize_elems(Res, []),
+	%erlang:display(Clauses_gen_tp),
+	[Clauses_gen_tp];
+	%Res;
 get_clauses_type([Clause | Clauses], [Clause_vars | All_vars], Call_stack, Res) ->
 	Clause_tp = get_clause_type(Clause, Clause_vars, Call_stack),
 
@@ -97,6 +104,7 @@ define_bodies_type([Last_body], Vars, Call_stack) ->
 	end;
 define_bodies_type([Body | Bodies], Vars, Call_stack) ->
 	{Body_type, Upd_vars} = infer_expr_tp(Body, Vars, Call_stack),
+
 	case Body_type of
 		{none, []} -> [];
 		_          -> define_bodies_type(Bodies, Upd_vars, Call_stack)
@@ -112,7 +120,7 @@ infer_expr_tp(Expr, Vars, Call_stack) ->
 		infix_expr      -> {infer_infix_expr_type(Expr, ?Expr:value(Expr), Vars, Call_stack), Vars};
 		variable        -> {infer_var_type(Expr, Vars), Vars};
 		parenthesis     -> infer_parenthesis_inf(Expr, Vars, Call_stack);
-		fun_expr        -> Fun_expr = {fun_expr, Expr},
+		fun_expr        -> Fun_expr = {fun_expr, [Expr]},
 		                   {Fun_expr, Vars};
 		application     -> {infer_fun_app_type(Expr, Vars, Call_stack), Vars};
 		cons            -> infer_cons_expr_type(Expr, Vars, Call_stack);
@@ -158,7 +166,11 @@ construct_and_convert_cons_to_cf(Cons_expr, Vars, Call_stack) ->
 
 infer_cons_expr_type(Cons_expr, Vars, Call_stack) ->
 	{Lst_in_cf, Upd_vars} = construct_and_convert_cons_to_cf(Cons_expr, Vars, Call_stack),
-	{generalize_term(Lst_in_cf, []), Upd_vars}.
+
+	case Lst_in_cf of
+		{none, []} -> {{none, []}, Upd_vars};
+		_          -> {generalize_term(Lst_in_cf, []), Upd_vars}
+	end.
 
 
 construct_and_convert_tuple_to_cf(Tuple_expr, Vars, Call_stack) ->
@@ -168,7 +180,11 @@ construct_and_convert_tuple_to_cf(Tuple_expr, Vars, Call_stack) ->
 
 infer_tuple_expr_type(Tuple_expr, Vars, Call_stack) ->
 	{Tuple_in_cf, Upd_vars} = construct_and_convert_tuple_to_cf(Tuple_expr, Vars, Call_stack),
-	{generalize_term(Tuple_in_cf, []), Upd_vars}.
+
+	case Tuple_in_cf of
+		{none, []} -> {{none, []}, Upd_vars};
+		_          -> {generalize_term(Tuple_in_cf, []), Upd_vars}
+	end.
 
 
 infer_fun_app_type(Fun_app_expr, Vars, Call_stack) ->
@@ -331,18 +347,34 @@ infer_non_BIF_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Parent_fun_vars,
 	%erlang:display(Vars),
 
 	%erlang:display("-----------------------------"),
-	Is_recursive_fun = {Mod_name, Fun_name, Arity} == hd(Call_stack),
-	Is_call_stack_member = lists:member({Mod_name, Fun_name, Arity}, Call_stack),
+	%erlang:display(Actual_clauses),
+	%erlang:display(Arg_lst),
+	{Root, Call_stack_funs} = Call_stack,
+	Prev_fun_sig = 
+		case Call_stack_funs of
+			[] -> Root;
+			_  -> hd(Call_stack_funs) 
+		end,
+ 
+	Is_recursive_fun = {Mod_name, Fun_name, Arity} == Prev_fun_sig,
+	Is_mutually_rec_funs = lists:member({Mod_name, Fun_name, Arity}, Call_stack_funs),
+	%erlang:display(Actual_clauses),
 
-	case Is_recursive_fun or Is_call_stack_member of
-		true  -> {none, []};
-		false -> Fun_tp = get_clauses_type(Actual_clauses, Vars, [{Mod_name, Fun_name, Arity} | Call_stack], []),
+	Fun_tp = 
+		case {Is_recursive_fun, Is_mutually_rec_funs} of
+			{true, false}  -> [{none, []}];
+			{true, true}   -> [{any, []}];
+			{false, true}  -> [{any, []}];
+			{false, false} -> Upd_call_stack = {Root, [{Mod_name, Fun_name, Arity} | Call_stack_funs]},
+			                  get_clauses_type(Actual_clauses, Vars, Upd_call_stack, [])
+		end,
 
-			    case length(Fun_tp) of
-				    1 -> hd(Fun_tp);
-				    _ -> {union, Fun_tp}
-			    end
-	end.
+	%erlang:display(Fun_tp),
+
+    case length(Fun_tp) of
+	    1 -> hd(Fun_tp);
+	    _ -> {union, Fun_tp}
+    end.
 
 
 replace_clauses_params_with_args([], _) -> [];
@@ -519,8 +551,11 @@ generalize_elems([], Elems_tbl) ->
 	Elems_tbl_secs = tuple_to_list(Elems_tbl),
 	Gen_elems = convert_elems_tbl_to_internal_format(Elems_tbl_secs, []),
 	{Gen_elems, Elems_tbl};
+%generalize_elems([Elem | Elems], Elems_tbl) when element(?ANY_SEC_INDEX, Elems_tbl) == {any, {any, []}} ->
+%	{{any, []}, Elems_tbl};
 generalize_elems([Elem | Elems], Elems_tbl) ->
 	Upd_elems_tbl = upd_elems_tbl_with_new_elem(Elem, Elems_tbl),
+	%erlang:display(Upd_elems_tbl),
 	generalize_elems(Elems, Upd_elems_tbl).
 
 
@@ -534,15 +569,15 @@ generalize_term({union, Elem_val}, Elems_tbl) ->
 generalize_term({boolean, Elem_val}, _Elems_tbl) ->
 	{boolean, Elem_val};
 generalize_term({Elem_tp, Elem_val}, _Elems_tbl) when (Elem_tp == neg_integer) or (Elem_tp == pos_integer) 
-	                                                          or (Elem_tp == non_neg_integer) or (Elem_tp == integer) 
-	                                                          or (Elem_tp == float) or (Elem_tp == number) ->
+	                                               or (Elem_tp == non_neg_integer) or (Elem_tp == integer) 
+	                                               or (Elem_tp == float) or (Elem_tp == number) ->
 	{Elem_tp, Elem_val};
 generalize_term({Elem_tp, Elem_val}, _Elems_tbl) when (Elem_tp == atom) ->
 	{Elem_tp, Elem_val};
 generalize_term({Elem_tp, Elem_val}, Elems_tbl) when (Elem_tp == empty_list) or (Elem_tp == ungen_list)
-												              or (Elem_tp == nonempty_list)
-												              or (Elem_tp == nonempty_improper_list) or (Elem_tp == maybe_improper_list)
-												              or (Elem_tp == nonempty_maybe_improper_list) or (Elem_tp == list) ->
+												  or (Elem_tp == nonempty_list)
+												  or (Elem_tp == nonempty_improper_list) or (Elem_tp == maybe_improper_list)
+												  or (Elem_tp == nonempty_maybe_improper_list) or (Elem_tp == list) ->
 	{Gen_lst, _} = generalize_lst({Elem_tp, Elem_val}, Elems_tbl),
 	Gen_lst;
 generalize_term({Elem_tp, Elem_val}, _Elems_tbl) when (Elem_tp == ungen_tuple) or (Elem_tp == tuple) ->
@@ -654,6 +689,12 @@ generate_tuples_from_tuple_tbl({tuples, [Tuple_tbl_item | Items]}, Res) ->
 
 upd_elems_tbl_by_index(_Elem, Elems_tbl, ?ANY_SEC_INDEX) ->
 	set_elems_tbl_to_any(Elems_tbl);
+upd_elems_tbl_by_index({Tp, Val}, Elems_tbl, ?IMPROPER_ELEMS_SEC_INDEX) ->
+    Sec = element(?IMPROPER_ELEMS_SEC_INDEX, Elems_tbl),
+	Upd_improp_sec = upd_improp_elems_sec({Tp, Val}, Sec),
+	setelement(?IMPROPER_ELEMS_SEC_INDEX, Elems_tbl, Upd_improp_sec);
+upd_elems_tbl_by_index(_Elem, Elems_tbl, _) when (element(1, Elems_tbl) == {any, [{any, []}]}) ->
+	Elems_tbl;
 upd_elems_tbl_by_index({_Tp, Val}, Elems_tbl, ?UNION_INDEX) ->
 	upd_elems_tbl_with_new_elems(Val, Elems_tbl);
 upd_elems_tbl_by_index({Tp, Val}, Elems_tbl, Index) ->
@@ -665,8 +706,8 @@ upd_elems_tbl_by_index({Tp, Val}, Elems_tbl, Index) ->
 		?NUMS_SEC_INDEX           -> upd_numbers_sec({Tp, Val}, Sec);
 		?ATOMS_SEC_INDEX          -> upd_atoms_sec({Tp, Val}, Sec);
 		?LISTS_SEC_INDEX          -> upd_lst_sec({Tp, Val}, Sec);
-		?TUPLES_SEC_INDEX         -> upd_tuple_sec({tuple, Val}, Sec);
-		?IMPROPER_ELEMS_SEC_INDEX -> upd_improp_elems_sec({Tp, Val}, Sec)
+		?TUPLES_SEC_INDEX         -> upd_tuple_sec({tuple, Val}, Sec)
+%		?IMPROPER_ELEMS_SEC_INDEX -> upd_improp_elems_sec({Tp, Val}, Sec)
 	end,
 
 	setelement(Index, Elems_tbl, Upd_sec).
@@ -699,6 +740,8 @@ generalize_tuple({Tp, Val}) ->
 
 	
 %empty_list
+generalize_lst({ungen_list, [{any, []}]}, Elems_tbl) ->
+	{{list, [{any, []}]}, set_elems_tbl_to_any(?ELEMS_TBL)};
 generalize_lst(Empty_lst = {empty_list, []}, Elems_tbl) ->
 	{Empty_lst, Elems_tbl};
 generalize_lst({Lst_tp, {empty_list, []}}, Elems_tbl) ->
@@ -1290,16 +1333,30 @@ convert_list_elems_in_basic_format_to_compound([{'...', Val}], Converted_values)
 	{ungen_list, lists:reverse([{'...', Val} | Converted_values])};
 convert_list_elems_in_basic_format_to_compound([H | T], Converted_values) ->
 	Converted_value = convert_value_in_basic_format_to_compound(H),
-	convert_list_elems_in_basic_format_to_compound(T, [Converted_value | Converted_values]);
+
+	case Converted_value of
+		{none, []} -> {none, []};
+		_          -> convert_list_elems_in_basic_format_to_compound(T, [Converted_value | Converted_values])
+	end;
 convert_list_elems_in_basic_format_to_compound(Val, Converted_values) ->
 	Converted_value = convert_value_in_basic_format_to_compound(Val),
-	Reversed_values = lists:reverse(Converted_values),
-	{ungen_list, Reversed_values ++ Converted_value}.
+
+	case Converted_value of
+		{none, []} -> {none, []};
+		{any, []}  -> {ungen_list, lists:reverse(Converted_values)};
+		_          -> Reversed_values = lists:reverse(Converted_values),
+	                  {ungen_list, Reversed_values ++ Converted_value}
+    end.
+
 
 convert_tuple_elems_in_basic_format_to_compound([]) -> [];
 convert_tuple_elems_in_basic_format_to_compound([H | T]) ->
 	Converted_value = convert_value_in_basic_format_to_compound(H),
-	[Converted_value | convert_tuple_elems_in_basic_format_to_compound(T)].
+
+	case Converted_value of
+		{none, []} -> {none, []};
+		_          -> [Converted_value | convert_tuple_elems_in_basic_format_to_compound(T)]
+	end.
 
 convert_value_in_basic_format_to_compound([]) -> 
 	{empty_list, []};
@@ -1311,7 +1368,8 @@ convert_value_in_basic_format_to_compound({Tp, Val}) when (Tp == empty_list) or 
 														   or (Tp == boolean) or (Tp == union)
 														   or (Tp == neg_integer) or (Tp == pos_integer)
 														   or (Tp == non_neg_integer) or (Tp == integer)
-														   or (Tp == float) or (Tp == number) or (Tp == any) -> 
+														   or (Tp == float) or (Tp == number) or (Tp == any)
+														   or (Tp == {none, []}) -> 
 	{Tp, Val};
 convert_value_in_basic_format_to_compound({'...', Val}) -> 
 	{'...', Val};
@@ -1387,6 +1445,7 @@ filter_clauses([Pat_expr | Pat_exprs], Pars, [Guard | Guards]) ->
 	Upd_vars = replace_clause_params_with_args(Pat_expr, Pars, []),
 	Pat = obtain_pats_tp(Pat_expr, Upd_vars),
 	Is_pars_matched = compare_pat_with_actual_pars(Pat, Pars, true),
+	%erlang:display(),
 
 	case Is_pars_matched of
 		true -> 
@@ -1477,9 +1536,6 @@ are_matching_unions(Union1, Union2) ->
 	end.
 	
 
-are_matching_types(Type, Type) ->
-	true;
-
 are_matching_types({any, []}, _Tp2) ->
 	possibly;
 are_matching_types(_Tp1, {any, []}) ->
@@ -1501,9 +1557,15 @@ are_matching_types({Tp1, _Val1}, {number, _Val2}) when (Tp1 == neg_integer) or (
 													or (Tp1 == float) or (Tp1 == number) ->
 	possibly;
 
-are_matching_types({_Tp1, [Value]}, {_Tp2, [Value]}) when is_number(Value) ->
+are_matching_types({Tp1, [Value]}, {Tp2, [Value]}) when (Tp1 == neg_integer)     or (Tp1 == pos_integer) 
+                                                     or (Tp1 == non_neg_integer) or (Tp1 == integer)
+                                                    and (Tp2 == neg_integer)     or (Tp2 == pos_integer) 
+                                                     or (Tp2 == non_neg_integer) or (Tp2 == integer) ->
 	true;
-
+are_matching_types({Tp, [Value]}, {Tp, [Value]}) when (Tp == atom)  or (Tp == boolean)
+                                                   or (Tp == float) or (Tp == implicit_fun)
+                                                   or (Tp == fun_expr) ->
+	true;
 are_matching_types({neg_integer, [_Value]}, {Tp2, []}) when (Tp2 == neg_integer) or (Tp2 == integer) ->
 	possibly;
 are_matching_types({pos_integer, [_Value]}, {Tp2, []}) when (Tp2 == pos_integer) or (Tp2 == non_neg_integer) 
@@ -1534,10 +1596,8 @@ are_matching_types({pos_integer, [_Value]}, {Tp2, []}) when (Tp2 == pos_integer)
 are_matching_types({non_neg_integer, [_Value]}, {Tp2, []}) when (Tp2 == non_neg_integer) or (Tp2 == integer) ->
 	possibly;
 are_matching_types({integer, [_Value]}, {Tp2, []}) when (Tp2 == neg_integer) or (Tp2 == pos_integer) 
-                                                       or (Tp2 == non_neg_integer) or (Tp2 == integer) ->
+                                                     or (Tp2 == non_neg_integer) or (Tp2 == integer) ->
 	possibly;	
-are_matching_types({Type, [Val1]}, {Type, [Val2]}) when (Val1 == Val2) ->
-	true;
 are_matching_types({Type, [_Value]}, {Type, []}) when (Type == float) or (Type == atom) 
                                                    or (Type == boolean) or (Type == fun_expr) 
                                                    or (Type == implicit_fun) ->
@@ -1555,10 +1615,10 @@ are_matching_types({variable, _Value}, _Tp2) ->
 are_matching_types(_Tp1, {variable, _Value}) ->
 	possibly;
 
-are_matching_types({Lst_tp1, Elems1}, {Lst_tp2, Elems2}) when ((Lst_tp1 == nonempty_list)
+are_matching_types({Lst_tp1, Elems1}, {Lst_tp2, Elems2}) when ((Lst_tp1 == nonempty_list) or (Lst_tp1 == empty_list)
                                                            or (Lst_tp1 == nonempty_improper_list) or (Lst_tp1 == maybe_improper_list)
                                                            or (Lst_tp1 == nonempty_maybe_improper_list) or (Lst_tp1 == list))
-                                                          and ((Lst_tp2 == nonempty_list)
+                                                          and ((Lst_tp2 == nonempty_list) or (Lst_tp2 == empty_list) 
                                                            or (Lst_tp2 == nonempty_improper_list) or (Lst_tp2 == maybe_improper_list)
                                                            or (Lst_tp2 == nonempty_maybe_improper_list) or (Lst_tp2 == list)) ->
 	are_matching_lists({Lst_tp1, Elems1}, {Lst_tp2, Elems2});
@@ -1582,7 +1642,12 @@ are_matching_tuples({tuple, [Elem1 | Elems1]}, {tuple, [Elem2 | Elems2]}, Status
 		true     -> are_matching_tuples({tuple, Elems1}, {tuple, Elems2}, Status)
 	end. 
 
-
+are_matching_lists({empty_list, []}, {empty_list, []}) ->
+	true;
+are_matching_lists({empty_list, []}, {Lst2_tp, _Elems}) when (Lst2_tp == list) or (Lst2_tp == maybe_improper_list) ->
+	possibly;
+are_matching_lists({Lst1_tp, _Elems}, {empty_list, []}) when (Lst1_tp == list) or (Lst1_tp == maybe_improper_list) ->
+	possibly;
 are_matching_lists({_Lst_tp1, [{any, []}]}, _Lst2) ->
     possibly;
 are_matching_lists(_Lst1, {_Lst_tp2, [{any, []}]}) ->
@@ -1635,6 +1700,7 @@ extract_expr_vals([Expr | Exprs], Vars, Call_stack) ->
 		            {[Var | Vals], Upd_vars2};
 		_        -> {Gen_expr_tp, Upd_vars} = infer_expr_tp(Expr, Vars, Call_stack), 
 					{Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars, Call_stack),
+					%erlang:display(Gen_expr_tp),
 					{[Gen_expr_tp | Vals], Upd_vars2}		
 	end.
 
@@ -1660,6 +1726,7 @@ construct_tuple([], _Vars, _Call_stack) -> [];
 construct_tuple(Tuple, Vars, Call_stack) ->
 	Children = ?Query:exec(Tuple, ?Expr:children()),
 	{Tuple_elems_in_lst, Upd_vars} = extract_expr_vals(Children, Vars, Call_stack),
+	%erlang:display(Tuple_elems_in_lst),
 	{list_to_tuple(Tuple_elems_in_lst), Upd_vars}.
 
 
@@ -2071,6 +2138,7 @@ test() ->
 	B51 = refined_genspec:g(A51),
 	C51 = refined_genspec:c([[[5,6 | 7]], B51]),
 	Test51 = refined_genspec:g(C51),
+	%erlang:display(Test51),
 	erlang:display({test51, Test51 == {nonempty_list,
 									    [{nonempty_list,
 									         [{nonempty_improper_list,
@@ -2309,6 +2377,10 @@ t(Tuple) ->
 
 i(Mod_name, Fun_name, Arity) ->
 	infer_fun_type(Mod_name, Fun_name, Arity, []).
+
+ge(Elems) ->
+	{Gen_elems, _Upd_elems_tbl} = generalize_elems(Elems, []),
+	Gen_elems.
 
 
 
