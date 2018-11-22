@@ -1736,6 +1736,56 @@ construct_list_from_list_expr(L, Vars, Call_stack) ->
 	extract_expr_vals(Children, Vars, Call_stack).
 
 %--------------------Extraction of a function specification from the typer result--------------------------------------
+improve_typer_res(Mod_name) ->
+	Mod_node_in_lst = ?Query:exec(?Mod:find(Mod_name)),
+
+	Mod_node = 
+		case Mod_node_in_lst of
+			[]    -> [];
+			[Res] -> Res 
+		end,
+
+	[File_node] = ?Query:exec(Mod_node, ?Mod:file()),
+	Path = ?File:path(File_node),
+	Spec = os:cmd("typer " ++ [$" | Path] ++ "\""),
+	RE = lists:concat(["-spec ", ".+\."]),
+	{_, Capture} = re:run(Spec, RE, [global, {capture, all, list}]),
+	Specs = extract_matches(Capture),
+
+	improve_all_specs(Specs, Mod_name).
+
+improve_all_specs([], _Mod_name) ->
+	[];
+improve_all_specs([Spec | Specs], Mod_name) ->
+	[improve_single_spec(Spec, Mod_name) | improve_all_specs(Specs, Mod_name)].
+
+improve_single_spec(Spec, Mod_name) ->
+	{Fun_name, Arity, Args_sec, Ret_val_sec} = get_fun_info(Spec, []).
+	Converted_ret_val = convert_typer_res_to_internal_format(Spec).
+
+
+
+convert_typer_res_to_internal_format([H | T]) ->
+	hello.
+
+
+
+filter_ret_val([$>, 32 | T]) ->
+	lists:droplast(T);
+filter_ret_val([_ | T]) ->
+	filter_ret_val(T).
+
+
+extract_possible_ret_types([], Buf, _, _) ->
+	lists:reverse(Buf);
+extract_possible_ret_types([32 | T], Buf, In_tupple, In_list) ->
+	extract_possible_ret_types(T, Buf, In_tupple, In_list);
+extract_possible_ret_types([$| | T], Buf, 0, 0) ->
+	[lists:reverse(Buf) | [extract_possible_ret_types(T, [], 0, 0)]];
+extract_possible_ret_types([H | T], Buf, In_tupple, In_list) ->
+	extract_possible_ret_types(T, [H | Buf], In_tupple, In_list).
+
+
 extract_matches([]) -> [];
 extract_matches([H | T]) ->
 	[hd(H) | extract_matches(T)]. 
@@ -1744,52 +1794,57 @@ get_fun_node(Mod_name, Fun_name, Arity) ->
 	[Mod] = ?Query:exec(?Mod:find(Mod_name)),
 	?Query:exec(Mod, ?Mod:local(Fun_name, Arity)).
 
-get_typer_specs(Path) ->
-	Spec = os:cmd("typer " ++ [$" | Path] ++ "\""),
-	RE = lists:concat(["-spec ", ".+\."]),
-	{_, Capture} = re:run(Spec, RE, [global, {capture, all, list}]),
-	extract_matches(Capture).
 
-get_fun_name([]) -> [];
-get_fun_name([$-, $s, $p, $e, $c, 32 | T]) ->
-	get_fun_name(T);
-get_fun_name([$( | _]) ->
-	[];
-get_fun_name([H | T]) ->
-	[H | get_fun_name(T)].
+
+get_fun_info([], Rev_fun_name) -> [];
+get_fun_info([32 | T], Rev_fun_name) ->
+	get_fun_info(T, Rev_fun_name);
+get_fun_info([$-, $s, $p, $e, $c, 32 | T], Rev_fun_name) ->
+	get_fun_info(T, Rev_fun_name);
+get_fun_info([$( | T], Rev_fun_name) ->
+	Fun_name = lists:reverse(Rev_fun_name),
+	{Arity, Args_sec, Ret_val_sec} = compute_arity_args_ret_tp([$( | T], 0, 0, 0, 0, 0, []),
+	Filtered_ret_val = filter_ret_val(Ret_val_sec),
+	{Fun_name, Arity, Args_sec, Filtered_ret_val};
+get_fun_info([H | T], Rev_fun_name) ->
+	get_fun_info(T, [H | Rev_fun_name]).
 
 get_arity(Spec) ->
-	compute_arity(Spec, 0, 0, 0, 0, 0).
+	compute_arity_args_ret_tp(Spec, 0, 0, 0, 0, 0, []).
 
 
-compute_arity([$, | T], 0, 0, 1, 0, Arity) ->
-	compute_arity(T, 0, 0, 1, 0, Arity + 1);
-compute_arity([$[ | T], List, Tupple, Fun, Binary, Arity) ->
-	compute_arity(T, List + 1, Tupple, Fun, Binary, Arity);
-compute_arity([$] | T], List, Tupple, Fun, Binary, Arity) ->
-	compute_arity(T, List - 1, Tupple, Fun, Binary, Arity);
-compute_arity([${ | T], List, Tupple, Fun, Binary, Arity) ->
-	compute_arity(T, List, Tupple + 1, Fun, Binary, Arity);
-compute_arity([$} | T], List, Tupple, Fun, Binary, Arity) ->
-	compute_arity(T, List, Tupple - 1, Fun, Binary, Arity);
-compute_arity([$( | T], List, Tupple, 0, Binary, _) ->
-	case hd(T) of
-		$) -> 0;
-		_  -> compute_arity(T, List, Tupple, 1, Binary, 1)
+compute_arity_args_ret_tp([$, | T], 0, 0, 1, 0, Arity, Args) ->
+	compute_arity_args_ret_tp(T, 0, 0, 1, 0, Arity + 1, [$, | Args]);
+compute_arity_args_ret_tp([$[ | T], List, Tupple, Fun, Binary, Arity, Args) ->
+	compute_arity_args_ret_tp(T, List + 1, Tupple, Fun, Binary, Arity, [$[ | Args]);
+compute_arity_args_ret_tp([$] | T], List, Tupple, Fun, Binary, Arity, Args) ->
+	compute_arity_args_ret_tp(T, List - 1, Tupple, Fun, Binary, Arity, [$] | Args]);
+compute_arity_args_ret_tp([${ | T], List, Tupple, Fun, Binary, Arity, Args) ->
+	compute_arity_args_ret_tp(T, List, Tupple + 1, Fun, Binary, Arity, [${ | Args]);
+compute_arity_args_ret_tp([$} | T], List, Tupple, Fun, Binary, Arity, Args) ->
+	compute_arity_args_ret_tp(T, List, Tupple - 1, Fun, Binary, Arity, [$} | Args]);
+compute_arity_args_ret_tp([$( | T], List, Tupple, 0, Binary, _, Args) ->
+	Next_elem = hd(T),
+
+	case Next_elem of
+		$) -> Args_sec = lists:reverse([$), $( | Args]),
+              {0, Args_sec, tl(T)};
+		_  -> compute_arity_args_ret_tp(T, List, Tupple, 1, Binary, 1, [$( | Args])
 	end;
-compute_arity([$( | T], List, Tupple, Fun, Binary, Arity) ->
-	compute_arity(T, List, Tupple, Fun + 1, Binary, Arity);
-compute_arity([$) | T], List, Tupple, Fun, Binary, Arity) ->
+compute_arity_args_ret_tp([$( | T], List, Tupple, Fun, Binary, Arity, Args) ->
+	compute_arity_args_ret_tp(T, List, Tupple, Fun + 1, Binary, Arity, [$( | Args]);
+compute_arity_args_ret_tp([$) | T], List, Tupple, Fun, Binary, Arity, Args) ->
 	case Fun of
-		1 -> Arity;
-		_ -> compute_arity(T, List, Tupple, Fun - 1, Binary, Arity)
+		1 -> Args_sec = lists:reverse([$) | Args]),
+		     {Arity, Args_sec, T};
+		_ -> compute_arity_args_ret_tp(T, List, Tupple, Fun - 1, Binary, Arity, [$) | Args])
 	end;
-compute_arity([$<, $< | T], List, Tupple, Fun, Binary, Arity) ->
-	compute_arity(T, List, Tupple, Fun, Binary + 1, Arity);
-compute_arity([$>, $> | T], List, Tupple, Fun, Binary, Arity) ->
-	compute_arity(T, List, Tupple, Fun, Binary - 1, Arity);
-compute_arity([_ | T], List, Tupple, Fun, Binary, Arity) ->
-	compute_arity(T, List, Tupple, Fun, Binary, Arity).
+compute_arity_args_ret_tp([$<, $< | T], List, Tupple, Fun, Binary, Arity, Args) ->
+	compute_arity_args_ret_tp(T, List, Tupple, Fun, Binary + 1, Arity, [$<, $< | Args]);
+compute_arity_args_ret_tp([$>, $> | T], List, Tupple, Fun, Binary, Arity, Args) ->
+	compute_arity_args_ret_tp(T, List, Tupple, Fun, Binary - 1, Arity, [$>, $> | Args]);
+compute_arity_args_ret_tp([H | T], List, Tupple, Fun, Binary, Arity, Args) ->
+	compute_arity_args_ret_tp(T, List, Tupple, Fun, Binary, Arity, [H | Args]).
 	
 
 test() ->
@@ -2395,24 +2450,7 @@ print_expr_val(Expr) ->
 	end.
 %--------------------------------Defining of actual ret type----------------------
 
-get_typer_ret_val([]) -> [];
-get_typer_ret_val(Spec) ->
-	Ret_val = move_to_ret_val(Spec),
-	extract_possible_ret_types(Ret_val, [], 0, 0).
 
-move_to_ret_val([$>, 32 | T]) ->
-	lists:droplast(T);
-move_to_ret_val([_ | T]) ->
-	move_to_ret_val(T).
-
-extract_possible_ret_types([], Buf, _, _) ->
-	lists:reverse(Buf);
-extract_possible_ret_types([32 | T], Buf, In_tupple, In_list) ->
-	extract_possible_ret_types(T, Buf, In_tupple, In_list);
-extract_possible_ret_types([$| | T], Buf, 0, 0) ->
-	[lists:reverse(Buf) | [extract_possible_ret_types(T, [], 0, 0)]];
-extract_possible_ret_types([H | T], Buf, In_tupple, In_list) ->
-	extract_possible_ret_types(T, [H | Buf], In_tupple, In_list).
 
 define_simple_type("float()") ->
 	[float, number];
