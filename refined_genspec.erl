@@ -1760,13 +1760,60 @@ improve_all_specs([Spec | Specs], Mod_name) ->
 	[improve_single_spec(Spec, Mod_name) | improve_all_specs(Specs, Mod_name)].
 
 improve_single_spec(Spec, Mod_name) ->
-	{Fun_name, Arity, Args_sec, Ret_val_sec} = get_fun_info(Spec, []).
-	Converted_ret_val = convert_typer_res_to_internal_format(Spec).
+	{Fun_name, Arity, Args_sec, Ret_val_sec} = get_fun_info(Spec, []),
+	Converted_ret_val = convert_typer_res_to_internal_format(Ret_val_sec, [], 0, 0).
 
+convert_typer_res_to_internal_format([], Buf, _Unions, _Atoms) ->
+	Buf;
+convert_typer_res_to_internal_format([32 | T], Buf, Unions, Atoms) ->
+	convert_typer_res_to_internal_format(T, Buf, Unions, Atoms);
 
+convert_typer_res_to_internal_format([$' | T], Buf, Unions, 0) ->
+	{Atom_val_in_str, Tail} = convert_typer_res_to_internal_format(T, [], 0, 1),
+	Atom_val = list_to_atom(Atom_val_in_str),
+	Upd_buf = [{atom, [Atom_val]} | Buf],
+	convert_typer_res_to_internal_format(Tail, Upd_buf, Unions, 0);
+convert_typer_res_to_internal_format([$' | T], Buf, Unions, 1) ->
+	{lists:reverse(Buf), T};
+convert_typer_res_to_internal_format([H | T], Buf, Unions, 1) ->
+	convert_typer_res_to_internal_format(T, [H | Buf], Unions, 1);
 
-convert_typer_res_to_internal_format([H | T]) ->
-	hello.
+convert_typer_res_to_internal_format("neg_integer()" ++ T, Buf, Unions, Atoms) ->
+	Upd_buf = [{neg_integer, []} | Buf],
+	convert_typer_res_to_internal_format(T, Upd_buf, Unions, Atoms);
+convert_typer_res_to_internal_format("pos_integer()" ++ T, Buf, Unions, Atoms) ->
+	Upd_buf = [{pos_integer, []} | Buf],
+	convert_typer_res_to_internal_format(T, Upd_buf, Unions, Atoms);
+convert_typer_res_to_internal_format("non_neg_integer()" ++ T, Buf, Unions, Atoms) ->
+	Upd_buf = [{non_neg_integer, []} | Buf],
+	convert_typer_res_to_internal_format(T, Upd_buf, Unions, Atoms);
+convert_typer_res_to_internal_format("integer()" ++ T, Buf, Unions, Atoms) ->
+	Upd_buf = [{integer, []} | Buf],
+	convert_typer_res_to_internal_format(T, Upd_buf, Unions, Atoms);
+convert_typer_res_to_internal_format("float()" ++ T, Buf, Unions, Atoms) ->
+	Upd_buf = [{float, []} | Buf],
+	convert_typer_res_to_internal_format(T, Upd_buf, Unions, Atoms);
+convert_typer_res_to_internal_format("number()" ++ T, Buf, Unions, Atoms) ->
+	Upd_buf = [{number, []} | Buf],
+	convert_typer_res_to_internal_format(T, Upd_buf, Unions, Atoms);
+convert_typer_res_to_internal_format("atom()" ++ T, Buf, Unions, Atoms) ->
+	Upd_buf = [{atom, []} | Buf],
+	convert_typer_res_to_internal_format(T, Upd_buf, Unions, Atoms);
+convert_typer_res_to_internal_format("boolean()" ++ T, Buf, Unions, Atoms) ->
+	Upd_buf = [{boolean, []} | Buf],
+	convert_typer_res_to_internal_format(T, Upd_buf, Unions, Atoms);
+convert_typer_res_to_internal_format("pid()" ++ T, Buf, Unions, Atoms) ->
+	Upd_buf = [{pid, []} | Buf],
+	convert_typer_res_to_internal_format(T, Upd_buf, Unions, Atoms);
+convert_typer_res_to_internal_format("any()" ++ T, Buf, Unions, Atoms) ->
+	Upd_buf = [{any, []} | Buf],
+	convert_typer_res_to_internal_format(T, Upd_buf, Unions, Atoms);
+convert_typer_res_to_internal_format([$| | T], Buf, 0, Atoms) ->
+	{union, convert_typer_res_to_internal_format(T, Buf, 1, Atoms)};
+convert_typer_res_to_internal_format([$| | T], Buf, 1, Atoms) ->
+	convert_typer_res_to_internal_format(T, Buf, 1, Atoms).
+
+	
 
 
 
@@ -1793,7 +1840,6 @@ extract_matches([H | T]) ->
 get_fun_node(Mod_name, Fun_name, Arity) ->
 	[Mod] = ?Query:exec(?Mod:find(Mod_name)),
 	?Query:exec(Mod, ?Mod:local(Fun_name, Arity)).
-
 
 
 get_fun_info([], Rev_fun_name) -> [];
@@ -1845,8 +1891,9 @@ compute_arity_args_ret_tp([$>, $> | T], List, Tupple, Fun, Binary, Arity, Args) 
 	compute_arity_args_ret_tp(T, List, Tupple, Fun, Binary - 1, Arity, [$>, $> | Args]);
 compute_arity_args_ret_tp([H | T], List, Tupple, Fun, Binary, Arity, Args) ->
 	compute_arity_args_ret_tp(T, List, Tupple, Fun, Binary, Arity, [H | Args]).
-	
 
+	
+%----------------------------Tests------------------------------------------------------------------------
 test() ->
 	Test1 = infer_fun_type(unit_test, af1, 0, []),
 	erlang:display({test1, af1, Test1 == [{integer, [305]}]}),
