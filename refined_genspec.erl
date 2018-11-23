@@ -1764,95 +1764,45 @@ improve_single_spec(Spec, _Mod_name) ->
 	Converted_ret_val = convert_typer_res_to_internal_format(Ret_val_sec, [], 0).
 
 
-convert_atom([$' | T], Buf) ->
-	Atom_val_in_str = lists:reverse(Buf),
-	Atom_val = list_to_atom(Atom_val_in_str),
-	Atom = {atom, [Atom_val]},
-	{Atom, T};
-convert_atom([H | T], Buf) ->
-	convert_atom(T, [H | Buf]).
-
-
-convert_anon_fun([32 | T], Args) ->
-	convert_anon_fun(T, Args);
-convert_anon_fun([$, | T], Args) ->
-	convert_anon_fun(T, Args);
-convert_anon_fun([$( | T], Args) ->
-	convert_anon_fun(T, Args);
-convert_anon_fun("->" ++ T, Args) ->
-	{Ret_val, Str_after_conv} = convert_complex_elem(T, [], false),
-	Anon_fun = {fun_expr, [Args, Ret_val], []},
-	{Anon_fun, Str_after_conv};
-convert_anon_fun(Ret_val_str, Args) ->
-	{Arg, Str_after_conv} = convert_complex_elem(Ret_val_str, [], false),
-	convert_anon_fun(Str_after_conv, [Arg | Args]).
-
-
-convert_lst([$( | T], Prop_sec) ->
-	convert_lst(T, Prop_sec);
-convert_lst(",..." ++ T, Prop_sec) ->
-	{{nonempty_list, Prop_sec}, tl(T)};
-convert_lst([$, | T], Prop_sec) ->
-	{Improp_sec, Str_after_conv} = convert_complex_elem(T, [], false),
-	Lst = {nonempty_improper_list, Prop_sec ++ [Improp_sec]},
-	{Lst, Str_after_conv};
-convert_lst([$] | T], Prop_sec) ->
-	{{list, Prop_sec}, T};
-convert_lst(Lst_elems_str, Prop_sec) ->
-	{Lst_elems, Str_after_conv} = convert_complex_elem(Lst_elems_str, [], false),
-	convert_lst(Str_after_conv, [Lst_elems | Prop_sec]).
-
-
-convert_literal_number([H | T], Buf) when (H >= 48) and (H =< 57) ->
-	convert_literal_number(T, [H | Buf]);
-convert_literal_number(T, Buf) ->
-	Number_in_str = lists:reverse(Buf),
-	Number = list_to_integer(Number_in_str),
-
-	Number_in_cf = 
-		if
-			Number  < 0  -> {neg_integer, [Number]};
-			Number == 0 -> {non_neg_integer, [Number]};
-			Number  > 0  -> {pos_integer, [Number]}
-		end,
-	{Number_in_cf, T}.
-
-
-convert_complex_elem([], Elems, true) ->
-	{{union, Elems}, []};
-convert_complex_elem([], Elems, false) ->
-	{hd(Elems), []};
-convert_complex_elem([32 | T], Elems, Is_union) ->
-	convert_complex_elem(T, Elems, Is_union);
-convert_complex_elem([$) | T], Elems, true) ->
-	{{union, Elems}, T};
-convert_complex_elem([$) | T], Elems, false) ->
-	{hd(Elems), T};
-convert_complex_elem([$] | T], Elems, true) ->
-	{{union, Elems}, [$] | T]};
-convert_complex_elem([$] | T], Elems, false) ->
-	{hd(Elems), [$] | T]};
-convert_complex_elem([$( | T], Elems, Is_union) ->
-	{Elem, Str_after_conv} = convert_complex_elem(T, [], false),
-	convert_complex_elem(Str_after_conv, [Elem | Elems], Is_union);
-convert_complex_elem([$| | T], Elems, _Is_union) ->
-	convert_complex_elem(T, Elems, true);
-convert_complex_elem([$, | T], Elems, true) ->
-	{{union, Elems}, [$, | T]};
-convert_complex_elem([$, | T], Elems, false) ->
-	{hd(Elems), [$, | T]};
-convert_complex_elem(Ret_val_str, Elems, Is_union) ->
-	{Elem, Str_after_conv} = convert_single_elem(Ret_val_str),
-	convert_complex_elem(Str_after_conv, [Elem | Elems], Is_union).
-
-
 convert_typer_res_to_internal_format([], Elems, _Unions) ->
 	Elems;
 convert_typer_res_to_internal_format([32 | T], Elems, Unions) ->
 	convert_typer_res_to_internal_format(T, Elems, Unions);
 convert_typer_res_to_internal_format(Ret_val_str, Elems, Unions) ->
-	{Elem, Tail} = convert_complex_elem(Ret_val_str, [], false),
+	{Elem, Tail} = convert_composite_elem(Ret_val_str, [], false),
 	convert_typer_res_to_internal_format(Tail, [Elem | Elems], Unions).
+
+
+convert_composite_elem([], Elems, true) ->
+	{{union, Elems}, []};
+convert_composite_elem([], Elems, false) ->
+	{hd(Elems), []};
+convert_composite_elem([32 | T], Elems, Is_union) ->
+	convert_composite_elem(T, Elems, Is_union);
+convert_composite_elem([$) | T], Elems, true) ->
+	{{union, Elems}, T};
+convert_composite_elem([$) | T], Elems, false) ->
+	{hd(Elems), T};
+convert_composite_elem([$] | T], Elems, true) ->
+	{{union, Elems}, [$] | T]};
+convert_composite_elem([$] | T], Elems, false) ->
+	{hd(Elems), [$] | T]};
+convert_composite_elem([$} | T], Elems, true) ->
+	{{union, Elems}, [$} | T]};
+convert_composite_elem([$} | T], Elems, false) ->
+	{hd(Elems), [$} | T]};
+convert_composite_elem([$( | T], Elems, Is_union) ->
+	{Elem, Str_after_conv} = convert_composite_elem(T, [], false),
+	convert_composite_elem(Str_after_conv, [Elem | Elems], Is_union);
+convert_composite_elem([$| | T], Elems, _Is_union) ->
+	convert_composite_elem(T, Elems, true);
+convert_composite_elem([$, | T], Elems, true) ->
+	{{union, Elems}, [$, | T]};
+convert_composite_elem([$, | T], Elems, false) ->
+	{hd(Elems), [$, | T]};
+convert_composite_elem(Ret_val_str, Elems, Is_union) ->
+	{Elem, Str_after_conv} = convert_single_elem(Ret_val_str),
+	convert_composite_elem(Str_after_conv, [Elem | Elems], Is_union).	
 
 
 convert_single_elem("neg_integer()" ++ T) ->
@@ -1885,10 +1835,12 @@ convert_single_elem([$' | T]) ->
 	convert_atom(T, []);
 convert_single_elem("fun" ++ T) ->
 	convert_anon_fun(T, []);
+convert_single_elem([${ | T]) ->
+	convert_tuple(T, []);
 convert_single_elem("[]" ++ T) ->
 	Lst = {empty_list, []},
 	{Lst, T};
-convert_single_elem("[" ++ T) ->
+convert_single_elem([$[ | T]) ->
 	convert_lst(T, []);
 convert_single_elem("nonempty_improper_list" ++ T) ->
 	convert_lst(T, []);
@@ -1908,6 +1860,68 @@ convert_single_elem("maybe_improper_list" ++ T) ->
 	{Lst, Str_after_conv};
 convert_single_elem([H | T]) when (H >= 48) and (H =< 57) ->
 	convert_literal_number(T, [H]).
+
+convert_atom([$' | T], Buf) ->
+	Atom_val_in_str = lists:reverse(Buf),
+	Atom_val = list_to_atom(Atom_val_in_str),
+	Atom = {atom, [Atom_val]},
+	{Atom, T};
+convert_atom([H | T], Buf) ->
+	convert_atom(T, [H | Buf]).
+
+
+convert_anon_fun([32 | T], Args) ->
+	convert_anon_fun(T, Args);
+convert_anon_fun([$, | T], Args) ->
+	convert_anon_fun(T, Args);
+convert_anon_fun([$( | T], Args) ->
+	convert_anon_fun(T, Args);
+convert_anon_fun("->" ++ T, Args) ->
+	{Ret_val, Str_after_conv} = convert_composite_elem(T, [], false),
+	Anon_fun = {fun_expr, [Args, Ret_val], []},
+	{Anon_fun, Str_after_conv};
+convert_anon_fun(Ret_val_str, Args) ->
+	{Arg, Str_after_conv} = convert_composite_elem(Ret_val_str, [], false),
+	convert_anon_fun(Str_after_conv, [Arg | Args]).
+
+
+convert_lst([$( | T], Prop_sec) ->
+	convert_lst(T, Prop_sec);
+convert_lst(",..." ++ T, Prop_sec) ->
+	{{nonempty_list, Prop_sec}, tl(T)};
+convert_lst([$, | T], Prop_sec) ->
+	{Improp_sec, Str_after_conv} = convert_composite_elem(T, [], false),
+	Lst = {nonempty_improper_list, Prop_sec ++ [Improp_sec]},
+	{Lst, Str_after_conv};
+convert_lst([$] | T], Prop_sec) ->
+	{{list, Prop_sec}, T};
+convert_lst(Ret_val_in_str, Prop_sec) ->
+	{Lst_elems, Str_after_conv} = convert_composite_elem(Ret_val_in_str, [], false),
+	convert_lst(Str_after_conv, [Lst_elems | Prop_sec]).
+
+convert_tuple([$} | T], Rev_elems) ->
+	Tuple_elems = lists:reverse(Rev_elems),
+	{{tuple, Tuple_elems}, T};	
+convert_tuple([$, | T], Elems) ->
+	convert_tuple(T, Elems);
+convert_tuple(Ret_val_in_str, Elems) ->
+	{Tuple_elem, Str_after_conv} = convert_composite_elem(Ret_val_in_str, [], false),
+	convert_tuple(Str_after_conv, [Tuple_elem | Elems]).
+
+
+convert_literal_number([H | T], Buf) when (H >= 48) and (H =< 57) ->
+	convert_literal_number(T, [H | Buf]);
+convert_literal_number(T, Buf) ->
+	Number_in_str = lists:reverse(Buf),
+	Number = list_to_integer(Number_in_str),
+
+	Number_in_cf = 
+		if
+			Number  < 0 -> {neg_integer, [Number]};
+			Number == 0 -> {non_neg_integer, [Number]};
+			Number  > 0 -> {pos_integer, [Number]}
+		end,
+	{Number_in_cf, T}.
 
 
 filter_ret_val([$>, 32 | T]) ->
