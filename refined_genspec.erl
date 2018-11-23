@@ -1775,6 +1775,8 @@ convert_atom([H | T], Buf) ->
 
 convert_anon_fun([32 | T], Args) ->
 	convert_anon_fun(T, Args);
+convert_anon_fun([$, | T], Args) ->
+	convert_anon_fun(T, Args);
 convert_anon_fun([$( | T], Args) ->
 	convert_anon_fun(T, Args);
 convert_anon_fun("->" ++ T, Args) ->
@@ -1786,9 +1788,34 @@ convert_anon_fun(Ret_val_str, Args) ->
 	convert_anon_fun(Str_after_conv, [Arg | Args]).
 
 
-%convert_lst(Lst_elems_str) ->
-%	{Lst_elems, Str_after_conv} = convert_complex_elem(Lst_elems_str),
+convert_lst([$( | T], Prop_sec) ->
+	convert_lst(T, Prop_sec);
+convert_lst(",..." ++ T, Prop_sec) ->
+	{{nonempty_list, Prop_sec}, tl(T)};
+convert_lst([$, | T], Prop_sec) ->
+	{Improp_sec, Str_after_conv} = convert_complex_elem(T, [], false),
+	Lst = {nonempty_improper_list, Prop_sec ++ [Improp_sec]},
+	{Lst, Str_after_conv};
+convert_lst([$] | T], Prop_sec) ->
+	{{list, Prop_sec}, T};
+convert_lst(Lst_elems_str, Prop_sec) ->
+	{Lst_elems, Str_after_conv} = convert_complex_elem(Lst_elems_str, [], false),
+	convert_lst(Str_after_conv, [Lst_elems | Prop_sec]).
 
+
+convert_literal_number([H | T], Buf) when (H >= 48) and (H =< 57) ->
+	convert_literal_number(T, [H | Buf]);
+convert_literal_number(T, Buf) ->
+	Number_in_str = lists:reverse(Buf),
+	Number = list_to_integer(Number_in_str),
+
+	Number_in_cf = 
+		if
+			Number  < 0  -> {neg_integer, [Number]};
+			Number == 0 -> {non_neg_integer, [Number]};
+			Number  > 0  -> {pos_integer, [Number]}
+		end,
+	{Number_in_cf, T}.
 
 
 convert_complex_elem([], Elems, true) ->
@@ -1801,18 +1828,21 @@ convert_complex_elem([$) | T], Elems, true) ->
 	{{union, Elems}, T};
 convert_complex_elem([$) | T], Elems, false) ->
 	{hd(Elems), T};
+convert_complex_elem([$] | T], Elems, true) ->
+	{{union, Elems}, [$] | T]};
+convert_complex_elem([$] | T], Elems, false) ->
+	{hd(Elems), [$] | T]};
 convert_complex_elem([$( | T], Elems, Is_union) ->
 	{Elem, Str_after_conv} = convert_complex_elem(T, [], false),
 	convert_complex_elem(Str_after_conv, [Elem | Elems], Is_union);
 convert_complex_elem([$| | T], Elems, _Is_union) ->
 	convert_complex_elem(T, Elems, true);
 convert_complex_elem([$, | T], Elems, true) ->
-	{{union, Elems}, T};
+	{{union, Elems}, [$, | T]};
 convert_complex_elem([$, | T], Elems, false) ->
-	{hd(Elems), T};
+	{hd(Elems), [$, | T]};
 convert_complex_elem(Ret_val_str, Elems, Is_union) ->
 	{Elem, Str_after_conv} = convert_single_elem(Ret_val_str),
-	%erlang:display(Elem),
 	convert_complex_elem(Str_after_conv, [Elem | Elems], Is_union).
 
 
@@ -1854,12 +1884,30 @@ convert_single_elem("_" ++ T) ->
 convert_single_elem([$' | T]) ->
 	convert_atom(T, []);
 convert_single_elem("fun" ++ T) ->
-	convert_anon_fun(T, []).
-%convert_single_elem("[" ++ T) when (Tp == list) ->
-%	convert_lst(T).
-
-	
-
+	convert_anon_fun(T, []);
+convert_single_elem("[]" ++ T) ->
+	Lst = {empty_list, []},
+	{Lst, T};
+convert_single_elem("[" ++ T) ->
+	convert_lst(T, []);
+convert_single_elem("nonempty_improper_list" ++ T) ->
+	convert_lst(T, []);
+convert_single_elem("nonempty_maybe_improper_list()" ++ T) ->
+	Lst = {nonempty_maybe_improper_list, [{any, []}]},
+	{Lst, T};
+convert_single_elem("nonempty_maybe_improper_list" ++ T) ->
+	{{_, Elems}, Str_after_conv} = convert_lst(T, []),
+	Lst = {nonempty_maybe_improper_list, Elems},
+	{Lst, Str_after_conv};
+convert_single_elem("maybe_improper_list()" ++ T) ->
+	Lst = {maybe_improper_list, [{any, []}]},
+	{Lst, T};
+convert_single_elem("maybe_improper_list" ++ T) ->
+	{{_, Elems}, Str_after_conv} = convert_lst(T, []),
+	Lst = {maybe_improper_list, Elems},
+	{Lst, Str_after_conv};
+convert_single_elem([H | T]) when (H >= 48) and (H =< 57) ->
+	convert_literal_number(T, [H]).
 
 
 filter_ret_val([$>, 32 | T]) ->
