@@ -20,6 +20,7 @@
 %15)Добавить обработку данного случая 
 %	f(A) when is_boolean(A) ->
 %	[{A, true, da}, {error, false, net}].
+%16)Сделать так, что если у функции есть спецификация - оставлять результат тайпера как есть.
 
 -include("user.hrl").
 -include("spec.hrl").
@@ -407,8 +408,7 @@ infer_match_expr_inf(Expr, Vars, Call_stack) ->
 
 match_simple_tp_expr(Ls_expr, Rs_expr, Vars, Call_stack) ->
 	case ?Expr:type(Rs_expr) of
-		variable -> Var_name = ?Expr:value(Rs_expr),
-		            bound_var_expr(Rs_expr, Ls_expr, Vars, Call_stack);
+		variable -> bound_var_expr(Rs_expr, Ls_expr, Vars, Call_stack);
 		_        -> {Ls_expr_tp, Upd_vars} = infer_expr_tp(Ls_expr, Vars, Call_stack),
 					{_Rs_expr_tp, Upd_vars2} = infer_expr_tp(Rs_expr, Upd_vars, Call_stack),
 					{Ls_expr_tp, Upd_vars2}
@@ -587,7 +587,7 @@ convert_elems_tbl_to_internal_format([{_Label, []} | T], Res) ->
 convert_elems_tbl_to_internal_format([{tuples, Elems_tbl} | T], Res) ->
 	Tuples = generate_tuples_from_tuple_tbl({tuples, Elems_tbl}, []),
 	convert_elems_tbl_to_internal_format(T, [Tuples | Res]);
-convert_elems_tbl_to_internal_format([{lists, [{empty_list, Elems_tbl}]} | T], Res) ->
+convert_elems_tbl_to_internal_format([{lists, [{empty_list, _Elems_tbl}]} | T], Res) ->
 	convert_elems_tbl_to_internal_format(T, [[{empty_list, []}] | Res]);
 convert_elems_tbl_to_internal_format([{lists, [{Lst_tp, Elems_tbl}]} | T], Res) ->
 	Elems_tbl_secs = tuple_to_list(Elems_tbl),
@@ -730,7 +730,7 @@ generalize_tuple({Tp, Val}) ->
 
 	
 %empty_list
-generalize_lst({ungen_list, [{any, []}]}, Elems_tbl) ->
+generalize_lst({ungen_list, [{any, []}]}, _Elems_tbl) ->
 	{{list, [{any, []}]}, set_elems_tbl_to_any(?ELEMS_TBL)};
 generalize_lst(Empty_lst = {empty_list, []}, Elems_tbl) ->
 	{Empty_lst, Elems_tbl};
@@ -988,7 +988,7 @@ build_lst(Lst_tp, [{_Label, []} | T], Res) ->
 build_lst(Lst_tp, [{tuples, Tuple_tbl} | T], Res) ->
 	Tuples = generate_tuples_from_tuple_tbl({tuples, Tuple_tbl}, []),
 	build_lst(Lst_tp, T, [Tuples | Res]);
-build_lst(Lst_tp, [{lists, [{empty_list, Elems_tbl}]} | T], Res) ->
+build_lst(Lst_tp, [{lists, [{empty_list, _Elems_tbl}]} | T], Res) ->
 	build_lst(Lst_tp, T, [[{empty_list, []}] | Res]);
 build_lst(Lst_tp, [{lists, [{Member_lst_tp, Elems_tbl}]} | T], Res) ->
 	Elems_tbl_secs = tuple_to_list(Elems_tbl),
@@ -1759,59 +1759,104 @@ improve_all_specs([], _Mod_name) ->
 improve_all_specs([Spec | Specs], Mod_name) ->
 	[improve_single_spec(Spec, Mod_name) | improve_all_specs(Specs, Mod_name)].
 
-improve_single_spec(Spec, Mod_name) ->
-	{Fun_name, Arity, Args_sec, Ret_val_sec} = get_fun_info(Spec, []),
-	Converted_ret_val = convert_typer_res_to_internal_format(Ret_val_sec, [], 0, 0).
+improve_single_spec(Spec, _Mod_name) ->
+	{_Fun_name, _Arity, _Args_sec, Ret_val_sec} = get_fun_info(Spec, []),
+	Converted_ret_val = convert_typer_res_to_internal_format(Ret_val_sec, [], 0).
 
-convert_typer_res_to_internal_format([], Buf, _Unions, _Atoms) ->
-	Buf;
-convert_typer_res_to_internal_format([32 | T], Buf, Unions, Atoms) ->
-	convert_typer_res_to_internal_format(T, Buf, Unions, Atoms);
 
-convert_typer_res_to_internal_format([$' | T], Buf, Unions, 0) ->
-	{Atom_val_in_str, Tail} = convert_typer_res_to_internal_format(T, [], 0, 1),
+convert_atom([$' | T], Buf) ->
+	Atom_val_in_str = lists:reverse(Buf),
 	Atom_val = list_to_atom(Atom_val_in_str),
-	Upd_buf = [{atom, [Atom_val]} | Buf],
-	convert_typer_res_to_internal_format(Tail, Upd_buf, Unions, 0);
-convert_typer_res_to_internal_format([$' | T], Buf, Unions, 1) ->
-	{lists:reverse(Buf), T};
-convert_typer_res_to_internal_format([H | T], Buf, Unions, 1) ->
-	convert_typer_res_to_internal_format(T, [H | Buf], Unions, 1);
+	Atom = {atom, [Atom_val]},
+	{Atom, T};
+convert_atom([H | T], Buf) ->
+	convert_atom(T, [H | Buf]).
 
-convert_typer_res_to_internal_format("neg_integer()" ++ T, Buf, Unions, Atoms) ->
-	Upd_buf = [{neg_integer, []} | Buf],
-	convert_typer_res_to_internal_format(T, Upd_buf, Unions, Atoms);
-convert_typer_res_to_internal_format("pos_integer()" ++ T, Buf, Unions, Atoms) ->
-	Upd_buf = [{pos_integer, []} | Buf],
-	convert_typer_res_to_internal_format(T, Upd_buf, Unions, Atoms);
-convert_typer_res_to_internal_format("non_neg_integer()" ++ T, Buf, Unions, Atoms) ->
-	Upd_buf = [{non_neg_integer, []} | Buf],
-	convert_typer_res_to_internal_format(T, Upd_buf, Unions, Atoms);
-convert_typer_res_to_internal_format("integer()" ++ T, Buf, Unions, Atoms) ->
-	Upd_buf = [{integer, []} | Buf],
-	convert_typer_res_to_internal_format(T, Upd_buf, Unions, Atoms);
-convert_typer_res_to_internal_format("float()" ++ T, Buf, Unions, Atoms) ->
-	Upd_buf = [{float, []} | Buf],
-	convert_typer_res_to_internal_format(T, Upd_buf, Unions, Atoms);
-convert_typer_res_to_internal_format("number()" ++ T, Buf, Unions, Atoms) ->
-	Upd_buf = [{number, []} | Buf],
-	convert_typer_res_to_internal_format(T, Upd_buf, Unions, Atoms);
-convert_typer_res_to_internal_format("atom()" ++ T, Buf, Unions, Atoms) ->
-	Upd_buf = [{atom, []} | Buf],
-	convert_typer_res_to_internal_format(T, Upd_buf, Unions, Atoms);
-convert_typer_res_to_internal_format("boolean()" ++ T, Buf, Unions, Atoms) ->
-	Upd_buf = [{boolean, []} | Buf],
-	convert_typer_res_to_internal_format(T, Upd_buf, Unions, Atoms);
-convert_typer_res_to_internal_format("pid()" ++ T, Buf, Unions, Atoms) ->
-	Upd_buf = [{pid, []} | Buf],
-	convert_typer_res_to_internal_format(T, Upd_buf, Unions, Atoms);
-convert_typer_res_to_internal_format("any()" ++ T, Buf, Unions, Atoms) ->
-	Upd_buf = [{any, []} | Buf],
-	convert_typer_res_to_internal_format(T, Upd_buf, Unions, Atoms);
-convert_typer_res_to_internal_format([$| | T], Buf, 0, Atoms) ->
-	{union, convert_typer_res_to_internal_format(T, Buf, 1, Atoms)};
-convert_typer_res_to_internal_format([$| | T], Buf, 1, Atoms) ->
-	convert_typer_res_to_internal_format(T, Buf, 1, Atoms).
+
+convert_anon_fun([32 | T], Args) ->
+	convert_anon_fun(T, Args);
+convert_anon_fun([$( | T], Args) ->
+	convert_anon_fun(T, Args);
+convert_anon_fun("->" ++ T, Args) ->
+	{Ret_val, Str_after_conv} = convert_complex_elem(T, [], false),
+	Anon_fun = {fun_expr, [Args, Ret_val], []},
+	{Anon_fun, Str_after_conv};
+convert_anon_fun(Ret_val_str, Args) ->
+	{Arg, Str_after_conv} = convert_complex_elem(Ret_val_str, [], false),
+	convert_anon_fun(Str_after_conv, [Arg | Args]).
+
+
+%convert_lst(Lst_elems_str) ->
+%	{Lst_elems, Str_after_conv} = convert_complex_elem(Lst_elems_str),
+
+
+
+convert_complex_elem([], Elems, true) ->
+	{{union, Elems}, []};
+convert_complex_elem([], Elems, false) ->
+	{hd(Elems), []};
+convert_complex_elem([32 | T], Elems, Is_union) ->
+	convert_complex_elem(T, Elems, Is_union);
+convert_complex_elem([$) | T], Elems, true) ->
+	{{union, Elems}, T};
+convert_complex_elem([$) | T], Elems, false) ->
+	{hd(Elems), T};
+convert_complex_elem([$( | T], Elems, Is_union) ->
+	{Elem, Str_after_conv} = convert_complex_elem(T, [], false),
+	convert_complex_elem(Str_after_conv, [Elem | Elems], Is_union);
+convert_complex_elem([$| | T], Elems, _Is_union) ->
+	convert_complex_elem(T, Elems, true);
+convert_complex_elem([$, | T], Elems, true) ->
+	{{union, Elems}, T};
+convert_complex_elem([$, | T], Elems, false) ->
+	{hd(Elems), T};
+convert_complex_elem(Ret_val_str, Elems, Is_union) ->
+	{Elem, Str_after_conv} = convert_single_elem(Ret_val_str),
+	%erlang:display(Elem),
+	convert_complex_elem(Str_after_conv, [Elem | Elems], Is_union).
+
+
+convert_typer_res_to_internal_format([], Elems, _Unions) ->
+	Elems;
+convert_typer_res_to_internal_format([32 | T], Elems, Unions) ->
+	convert_typer_res_to_internal_format(T, Elems, Unions);
+convert_typer_res_to_internal_format(Ret_val_str, Elems, Unions) ->
+	{Elem, Tail} = convert_complex_elem(Ret_val_str, [], false),
+	convert_typer_res_to_internal_format(Tail, [Elem | Elems], Unions).
+
+
+convert_single_elem("neg_integer()" ++ T) ->
+	{{neg_integer, []}, T};
+convert_single_elem("pos_integer()" ++ T) ->
+	{{pos_integer, []}, T};
+convert_single_elem("non_neg_integer()" ++ T) ->
+	{{non_neg_integer, []}, T};
+convert_single_elem("integer()" ++ T) ->
+	{{integer, []}, T};
+convert_single_elem("float()" ++ T) ->
+	{{float, []}, T};
+convert_single_elem("number()" ++ T) ->
+	{{number, []}, T};
+convert_single_elem("atom()" ++ T) ->
+	{{atom, []}, T};
+convert_single_elem("boolean()" ++ T) ->
+	{{boolean, []}, T};
+convert_single_elem("'true'" ++ T) ->
+	{{boolean, [true]}, T};
+convert_single_elem("'false'" ++ T) ->
+	{{boolean, [false]}, T};
+convert_single_elem("pid()" ++ T) ->
+	{{pid, []}, T};
+convert_single_elem("any()" ++ T) ->
+	{{any, []}, T};
+convert_single_elem("_" ++ T) ->
+	{{any, []}, T};
+convert_single_elem([$' | T]) ->
+	convert_atom(T, []);
+convert_single_elem("fun" ++ T) ->
+	convert_anon_fun(T, []).
+%convert_single_elem("[" ++ T) when (Tp == list) ->
+%	convert_lst(T).
 
 	
 
@@ -1842,18 +1887,17 @@ get_fun_node(Mod_name, Fun_name, Arity) ->
 	?Query:exec(Mod, ?Mod:local(Fun_name, Arity)).
 
 
-get_fun_info([], Rev_fun_name) -> [];
-get_fun_info([32 | T], Rev_fun_name) ->
-	get_fun_info(T, Rev_fun_name);
-get_fun_info([$-, $s, $p, $e, $c, 32 | T], Rev_fun_name) ->
-	get_fun_info(T, Rev_fun_name);
+get_fun_info([32 | T], Fun_name) ->
+	get_fun_info(T, Fun_name);
+get_fun_info([$-, $s, $p, $e, $c, 32 | T], Fun_name) ->
+	get_fun_info(T, Fun_name);
 get_fun_info([$( | T], Rev_fun_name) ->
 	Fun_name = lists:reverse(Rev_fun_name),
 	{Arity, Args_sec, Ret_val_sec} = compute_arity_args_ret_tp([$( | T], 0, 0, 0, 0, 0, []),
 	Filtered_ret_val = filter_ret_val(Ret_val_sec),
 	{Fun_name, Arity, Args_sec, Filtered_ret_val};
-get_fun_info([H | T], Rev_fun_name) ->
-	get_fun_info(T, [H | Rev_fun_name]).
+get_fun_info([H | T], Fun_name) ->
+	get_fun_info(T, [H | Fun_name]).
 
 get_arity(Spec) ->
 	compute_arity_args_ret_tp(Spec, 0, 0, 0, 0, 0, []).
@@ -2473,6 +2517,9 @@ i(Mod_name, Fun_name, Arity) ->
 ge(Elems) ->
 	{Gen_elems, _Upd_elems_tbl} = generalize_elems(Elems, []),
 	Gen_elems.
+
+ctr(Mod_name) ->
+	improve_typer_res(Mod_name).
 
 
 
