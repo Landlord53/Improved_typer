@@ -1764,55 +1764,85 @@ improve_all_specs([Spec | Specs], Mod_name) ->
 improve_single_spec(Spec, _Mod_name) ->
 	{Fun_name, _Arity, Args_sec, Ret_val_sec} = get_fun_info(Spec, []),
 	Converted_ret_val = convert_typer_res_to_internal_format(Ret_val_sec, [], 0),
-	erlang:display(Converted_ret_val),
-	Res_in_typer_format = convert_elem_in_cf_to_typer_format(Converted_ret_val),
+	Res_in_typer_format = convert_elem_to_tf(Converted_ret_val),
 	Res = "-spec " ++ Fun_name ++ Args_sec ++ " -> " ++ Res_in_typer_format ++ ".",
 	io:fwrite("~p~n", [Res]).
 
 
-convert_elems_in_cf_to_typer_format([]) -> [];
-convert_elems_in_cf_to_typer_format([Elem | Elems]) ->
-	[convert_elem_in_cf_to_typer_format(Elem) | convert_elems_in_cf_to_typer_format(Elems)].
+%tf - typer format
+%cf - compound format
+convert_elems_to_tf([]) -> [];
+convert_elems_to_tf([Elem | Elems]) ->
+	[convert_elem_to_tf(Elem) | convert_elems_to_tf(Elems)].
 
 
-convert_elem_in_cf_to_typer_format({Tp, [Val]}) when (Tp == neg_integer) or (Tp == pos_integer)
-                                                   or (Tp == non_neg_integer) or (Tp == integer) -> 
+convert_elem_to_tf({Tp, [Val]}) when (Tp == neg_integer)     or (Tp == pos_integer)
+                                  or (Tp == non_neg_integer) or (Tp == integer) -> 
     integer_to_list(Val);
-convert_elem_in_cf_to_typer_format({float, _Val}) ->
+convert_elem_to_tf({float, _Val}) ->
 	atom_to_list(float) ++ "()";
-convert_elem_in_cf_to_typer_format({Tp, [Val]}) when (Tp == boolean) or (Tp == atom) ->
+convert_elem_to_tf({Tp, [Val]}) when (Tp == boolean) or (Tp == atom) ->
 	[$' | atom_to_list(Val)] ++ "'";
-convert_elem_in_cf_to_typer_format({Tp, []}) when (Tp == neg_integer) or (Tp == pos_integer)
-                                               or (Tp == non_neg_integer) or (Tp == integer)
-                                               or (Tp == float) or (Tp == number)
-                                               or (Tp == atom) or (Tp == boolean)
-                                               or (Tp == pid) or (Tp == any) ->
+convert_elem_to_tf({Tp, []}) when (Tp == neg_integer)     or (Tp == pos_integer)
+                               or (Tp == non_neg_integer) or (Tp == integer)
+                               or (Tp == float)           or (Tp == number)
+                               or (Tp == atom)            or (Tp == boolean)
+                               or (Tp == pid)             or (Tp == any) ->
     atom_to_list(Tp) ++ "()";
-convert_elem_in_cf_to_typer_format({Tp, Val}) when (Tp == empty_list) or (Tp == nonempty_list)
-							                    or (Tp == nonempty_improper_list) or (Tp == maybe_improper_list)
-								                or (Tp == nonempty_maybe_improper_list) or (Tp == list) ->
-    convert_lst_in_cf_to_typer_format({Tp, Val});
-convert_elem_in_cf_to_typer_format({union, Elems}) ->
+convert_elem_to_tf({Tp, Val}) when (Tp == empty_list)                   or (Tp == nonempty_list)
+	                            or (Tp == nonempty_improper_list)       or (Tp == maybe_improper_list)
+		                        or (Tp == nonempty_maybe_improper_list) or (Tp == list) ->
+    convert_lst_to_tf({Tp, Val});
+convert_elem_to_tf({tuple, Elems}) ->
+	convert_tuple_to_tf({tuple, Elems});
+convert_elem_to_tf({union, Elems}) ->
 	convert_union_in_cf_to_typer_format(Elems).
 
 
 convert_union_in_cf_to_typer_format(Elems) ->
-	Elems_in_typer_format = convert_elems_in_cf_to_typer_format(Elems),
-	lists:concat(combine_elems(Elems_in_typer_format)).
+	Elems_in_typer_format = convert_elems_to_tf(Elems),
+	separate_elems_with_symbol(Elems_in_typer_format, " | ").
 
 
-convert_lst_in_cf_to_typer_format({empty_list, []}) ->
+convert_tuple_to_tf({undef_tuple, []}) ->
+	"tuple()";
+convert_tuple_to_tf({tuple, Elems}) ->
+	Elems_in_tf = convert_elems_to_tf(Elems),
+	Separated_elems = separate_elems_with_symbol(Elems_in_tf, ","),
+	[${ | Separated_elems] ++ "}".
+	
+
+convert_lst_to_tf({empty_list, []}) ->
 	"[]";
-convert_lst_in_cf_to_typer_format({nonempty_list, [Elems]}) ->
-	Elems_in_typer_format = convert_elem_in_cf_to_typer_format(Elems),
-	[$[ | Elems_in_typer_format] ++ ",...]".
+convert_lst_to_tf({nonempty_maybe_improper_list, [{any, []}]}) ->
+	"nonempty_maybe_improper_list()";
+convert_lst_to_tf({maybe_improper_list, [{any, []}]}) ->
+	"maybe_improper_list()";
+convert_lst_to_tf({nonempty_list, [Elem]}) ->
+	Elem_in_tf = convert_elem_to_tf(Elem),
+	[$[ | Elem_in_tf] ++ ",...]";
+convert_lst_to_tf({list, [Elem]}) ->
+	Elem_in_tf = convert_elem_to_tf(Elem),
+	[$[ | Elem_in_tf] ++ "]";
+convert_lst_to_tf({Lst_tp, [Prop_sec, Improp_sec]}) when (Lst_tp == nonempty_improper_list) 
+                                                      or (Lst_tp == nonempty_maybe_improper_list)
+                                                      or (Lst_tp == maybe_improper_list) ->
+	Conv_prop_sec = convert_elem_to_tf(Prop_sec),
+	Conv_improp_sec = convert_elem_to_tf(Improp_sec),
+	Lst_tp_in_str = atom_to_list(Lst_tp),
+	Lst_tp_in_str ++ "(" ++ Conv_prop_sec ++ "," ++ Conv_improp_sec ++ ")".
 
 
-combine_elems([Elem]) ->
+separate_elems_with_symbol(Elems, Symbol) ->
+	Elems_with_separators = insert_separators(Elems, Symbol),
+	lists:concat(Elems_with_separators).
+
+
+insert_separators([Elem], _Symbol) ->
 	[Elem];
-combine_elems([Elem | Elems]) ->
-	Elem_in_union = Elem ++ " | ",
-	[Elem_in_union | combine_elems(Elems)].
+insert_separators([Elem | Elems], Symbol) ->
+	Separated_elem = Elem ++ Symbol,
+	[Separated_elem | insert_separators(Elems, Symbol)].
 
 
 convert_typer_res_to_internal_format([], [Elem], _Unions) ->
@@ -1981,16 +2011,6 @@ filter_ret_val([$>, 32 | T]) ->
 	lists:droplast(T);
 filter_ret_val([_ | T]) ->
 	filter_ret_val(T).
-
-
-extract_possible_ret_types([], Buf, _, _) ->
-	lists:reverse(Buf);
-extract_possible_ret_types([32 | T], Buf, In_tupple, In_list) ->
-	extract_possible_ret_types(T, Buf, In_tupple, In_list);
-extract_possible_ret_types([$| | T], Buf, 0, 0) ->
-	[lists:reverse(Buf) | [extract_possible_ret_types(T, [], 0, 0)]];
-extract_possible_ret_types([H | T], Buf, In_tupple, In_list) ->
-	extract_possible_ret_types(T, [H | Buf], In_tupple, In_list).
 
 
 extract_matches([]) -> [];
