@@ -64,7 +64,8 @@ infer_fun_type(Mod_name, Fun_name, Arity, []) ->
 	Root = {{Mod_name, Fun_name, Arity}},
 	Clauses_num = length(Clauses),
 	Vars = lists:duplicate(Clauses_num, []),
- 	get_clauses_type(Clauses, Vars, {Root, []}, []).
+ 	[Ret_val_tp] = get_clauses_type(Clauses, Vars, {Root, []}, []),
+ 	Ret_val_tp.
 	%Clauses_types = lists:map(fun(Clause) -> get_clause_type(Clause, Variables, {Root, []}) end, Clauses),
 
 	%{Gen_clauses_tp, _} = generalize_elems(Clauses_types, []),
@@ -82,10 +83,10 @@ get_clause_type(Clause, Variables, Call_stack) ->
 
 
 get_clauses_type([], [], _Call_stack, Res) -> 
-	%{Clauses_gen_tp, _} = generalize_elems(Res, []),
+	{Clauses_gen_tp, _} = generalize_elems(Res, []),
 	%erlang:display(Clauses_gen_tp),
-	%Clauses_gen_tp;
-	Res;
+	[Clauses_gen_tp];
+	%Res;
 get_clauses_type([Clause | Clauses], [Clause_vars | All_vars], Call_stack, Res) ->
 	Clause_tp = get_clause_type(Clause, Clause_vars, Call_stack),
 
@@ -1762,8 +1763,9 @@ improve_all_specs([Spec | Specs], Mod_name) ->
 
 
 improve_single_spec(Spec, Mod_name) ->
-	{Fun_name, Arity, Args_sec, Ret_tp_in_str} = get_fun_info(Spec, []),
+	{Fun_name_in_str, Arity, Args_sec, Ret_tp_in_str} = get_fun_info(Spec, []),
 	Mod_node = ?Query:exec(?Mod:find(Mod_name)),
+	Fun_name = list_to_atom(Fun_name_in_str),
 	Spec_node = ?Query:exec(Mod_node, ?Spec:find(Fun_name, Arity)),
 
 	Res = 
@@ -1781,8 +1783,7 @@ improve_typer_ret_val(Mod_name, Fun_name, Arity, Args_sec, Ret_tp_in_str) ->
 	Improved_ret_tp = 
 		case Typer_ret_tp of
 			{none, []} -> {none, []};
-			_          -> Fun_name_in_atom = list_to_atom(Fun_name),
-						  Referl_ret_tp = infer_fun_type(Mod_name, Fun_name_in_atom, Arity, []),
+			_          -> Referl_ret_tp = infer_fun_type(Mod_name, Fun_name, Arity, []),
 						  filter_vals_beyond_thereach(Referl_ret_tp, Typer_ret_tp)
 		end,
 	 
