@@ -84,7 +84,7 @@ get_clause_type(Clause, Variables, Call_stack) ->
 get_clauses_type([], [], _Call_stack, Res) -> 
 	%{Clauses_gen_tp, _} = generalize_elems(Res, []),
 	%erlang:display(Clauses_gen_tp),
-	%[Clauses_gen_tp];
+	%Clauses_gen_tp;
 	Res;
 get_clauses_type([Clause | Clauses], [Clause_vars | All_vars], Call_stack, Res) ->
 	Clause_tp = get_clause_type(Clause, Clause_vars, Call_stack),
@@ -1761,12 +1761,37 @@ improve_all_specs([Spec | Specs], Mod_name) ->
 	[improve_single_spec(Spec, Mod_name) | improve_all_specs(Specs, Mod_name)].
 
 
-improve_single_spec(Spec, _Mod_name) ->
-	{Fun_name, _Arity, Args_sec, Ret_val_sec} = get_fun_info(Spec, []),
-	Converted_ret_val = convert_typer_res_to_internal_format(Ret_val_sec, [], 0),
-	Res_in_typer_format = convert_elem_to_tf(Converted_ret_val),
-	Res = "-spec " ++ Fun_name ++ Args_sec ++ " -> " ++ Res_in_typer_format ++ ".",
+improve_single_spec(Spec, Mod_name) ->
+	{Fun_name, Arity, Args_sec, Ret_tp_in_str} = get_fun_info(Spec, []),
+	Mod_node = ?Query:exec(?Mod:find(Mod_name)),
+	Spec_node = ?Query:exec(Mod_node, ?Spec:find(Fun_name, Arity)),
+
+	Res = 
+		case Spec_node of
+			[] -> improve_typer_ret_val(Mod_name, Fun_name, Arity, Args_sec, Ret_tp_in_str);
+			_  -> Spec
+		end,
+
 	io:fwrite("~p~n", [Res]).
+
+
+improve_typer_ret_val(Mod_name, Fun_name, Arity, Args_sec, Ret_tp_in_str) ->
+	Typer_ret_tp = convert_typer_res_to_cf(Ret_tp_in_str, [], 0),
+	
+	Improved_ret_tp = 
+		case Typer_ret_tp of
+			{none, []} -> {none, []};
+			_          -> Fun_name_in_atom = list_to_atom(Fun_name),
+						  Referl_ret_tp = infer_fun_type(Mod_name, Fun_name_in_atom, Arity, []),
+						  filter_vals_beyond_thereach(Referl_ret_tp, Typer_ret_tp)
+		end,
+	 
+	Res_in_typer_format = convert_elem_to_tf(Improved_ret_tp),
+	"-spec " ++ Fun_name ++ Args_sec ++ " -> " ++ Res_in_typer_format ++ ".".
+
+
+filter_vals_beyond_thereach(Referl_ret_tp, Typer_ret_tp) ->
+	Referl_ret_tp.
 
 
 %tf - typer format
@@ -1787,7 +1812,8 @@ convert_elem_to_tf({Tp, []}) when (Tp == neg_integer)     or (Tp == pos_integer)
                                or (Tp == non_neg_integer) or (Tp == integer)
                                or (Tp == float)           or (Tp == number)
                                or (Tp == atom)            or (Tp == boolean)
-                               or (Tp == pid)             or (Tp == any) ->
+                               or (Tp == pid)             or (Tp == any)
+                               or (Tp == none) ->
     atom_to_list(Tp) ++ "()";
 convert_elem_to_tf({Tp, Val}) when (Tp == empty_list)                   or (Tp == nonempty_list)
 	                            or (Tp == nonempty_improper_list)       or (Tp == maybe_improper_list)
@@ -1845,13 +1871,13 @@ insert_separators([Elem | Elems], Symbol) ->
 	[Separated_elem | insert_separators(Elems, Symbol)].
 
 
-convert_typer_res_to_internal_format([], [Elem], _Unions) ->
+convert_typer_res_to_cf([], [Elem], _Unions) ->
 	Elem;
-convert_typer_res_to_internal_format([32 | T], Elems, Unions) ->
-	convert_typer_res_to_internal_format(T, Elems, Unions);
-convert_typer_res_to_internal_format(Ret_val_str, Elems, Unions) ->
+convert_typer_res_to_cf([32 | T], Elems, Unions) ->
+	convert_typer_res_to_cf(T, Elems, Unions);
+convert_typer_res_to_cf(Ret_val_str, Elems, Unions) ->
 	{Elem, Tail} = convert_composite_elem(Ret_val_str, [], false),
-	convert_typer_res_to_internal_format(Tail, [Elem | Elems], Unions).
+	convert_typer_res_to_cf(Tail, [Elem | Elems], Unions).
 
 
 convert_composite_elem([], Elems, true) ->
@@ -2649,16 +2675,12 @@ t(Tuple) ->
 i(Mod_name, Fun_name, Arity) ->
 	infer_fun_type(Mod_name, Fun_name, Arity, []).
 
+itr(Mod_name) ->
+	improve_typer_res(Mod_name).
+
 ge(Elems) ->
 	{Gen_elems, _Upd_elems_tbl} = generalize_elems(Elems, []),
 	Gen_elems.
-
-ctr(Mod_name) ->
-	improve_typer_res(Mod_name).
-
-
-convert_back_and_forth(Mod_name) ->
-	improve_typer_res(Mod_name).
 
 
 
