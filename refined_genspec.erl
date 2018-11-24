@@ -1754,18 +1754,69 @@ improve_typer_res(Mod_name) ->
 
 	improve_all_specs(Specs, Mod_name).
 
+
 improve_all_specs([], _Mod_name) ->
 	[];
 improve_all_specs([Spec | Specs], Mod_name) ->
 	[improve_single_spec(Spec, Mod_name) | improve_all_specs(Specs, Mod_name)].
 
+
 improve_single_spec(Spec, _Mod_name) ->
-	{_Fun_name, _Arity, _Args_sec, Ret_val_sec} = get_fun_info(Spec, []),
-	Converted_ret_val = convert_typer_res_to_internal_format(Ret_val_sec, [], 0).
+	{Fun_name, _Arity, Args_sec, Ret_val_sec} = get_fun_info(Spec, []),
+	Converted_ret_val = convert_typer_res_to_internal_format(Ret_val_sec, [], 0),
+	erlang:display(Converted_ret_val),
+	Res_in_typer_format = convert_elem_in_cf_to_typer_format(Converted_ret_val),
+	Res = "-spec " ++ Fun_name ++ Args_sec ++ " -> " ++ Res_in_typer_format ++ ".",
+	io:fwrite("~p~n", [Res]).
 
 
-convert_typer_res_to_internal_format([], Elems, _Unions) ->
-	Elems;
+convert_elems_in_cf_to_typer_format([]) -> [];
+convert_elems_in_cf_to_typer_format([Elem | Elems]) ->
+	[convert_elem_in_cf_to_typer_format(Elem) | convert_elems_in_cf_to_typer_format(Elems)].
+
+
+convert_elem_in_cf_to_typer_format({Tp, [Val]}) when (Tp == neg_integer) or (Tp == pos_integer)
+                                                   or (Tp == non_neg_integer) or (Tp == integer) -> 
+    integer_to_list(Val);
+convert_elem_in_cf_to_typer_format({float, _Val}) ->
+	atom_to_list(float) ++ "()";
+convert_elem_in_cf_to_typer_format({Tp, [Val]}) when (Tp == boolean) or (Tp == atom) ->
+	[$' | atom_to_list(Val)] ++ "'";
+convert_elem_in_cf_to_typer_format({Tp, []}) when (Tp == neg_integer) or (Tp == pos_integer)
+                                               or (Tp == non_neg_integer) or (Tp == integer)
+                                               or (Tp == float) or (Tp == number)
+                                               or (Tp == atom) or (Tp == boolean)
+                                               or (Tp == pid) or (Tp == any) ->
+    atom_to_list(Tp) ++ "()";
+convert_elem_in_cf_to_typer_format({Tp, Val}) when (Tp == empty_list) or (Tp == nonempty_list)
+							                    or (Tp == nonempty_improper_list) or (Tp == maybe_improper_list)
+								                or (Tp == nonempty_maybe_improper_list) or (Tp == list) ->
+    convert_lst_in_cf_to_typer_format({Tp, Val});
+convert_elem_in_cf_to_typer_format({union, Elems}) ->
+	convert_union_in_cf_to_typer_format(Elems).
+
+
+convert_union_in_cf_to_typer_format(Elems) ->
+	Elems_in_typer_format = convert_elems_in_cf_to_typer_format(Elems),
+	lists:concat(combine_elems(Elems_in_typer_format)).
+
+
+convert_lst_in_cf_to_typer_format({empty_list, []}) ->
+	"[]";
+convert_lst_in_cf_to_typer_format({nonempty_list, [Elems]}) ->
+	Elems_in_typer_format = convert_elem_in_cf_to_typer_format(Elems),
+	[$[ | Elems_in_typer_format] ++ ",...]".
+
+
+combine_elems([Elem]) ->
+	[Elem];
+combine_elems([Elem | Elems]) ->
+	Elem_in_union = Elem ++ " | ",
+	[Elem_in_union | combine_elems(Elems)].
+
+
+convert_typer_res_to_internal_format([], [Elem], _Unions) ->
+	Elem;
 convert_typer_res_to_internal_format([32 | T], Elems, Unions) ->
 	convert_typer_res_to_internal_format(T, Elems, Unions);
 convert_typer_res_to_internal_format(Ret_val_str, Elems, Unions) ->
@@ -1774,21 +1825,21 @@ convert_typer_res_to_internal_format(Ret_val_str, Elems, Unions) ->
 
 
 convert_composite_elem([], Elems, true) ->
-	{{union, Elems}, []};
+	{{union, lists:reverse(Elems)}, []};
 convert_composite_elem([], Elems, false) ->
 	{hd(Elems), []};
 convert_composite_elem([32 | T], Elems, Is_union) ->
 	convert_composite_elem(T, Elems, Is_union);
 convert_composite_elem([$) | T], Elems, true) ->
-	{{union, Elems}, T};
+	{{union, lists:reverse(Elems)}, T};
 convert_composite_elem([$) | T], Elems, false) ->
 	{hd(Elems), T};
 convert_composite_elem([$] | T], Elems, true) ->
-	{{union, Elems}, [$] | T]};
+	{{union, lists:reverse(Elems)}, [$] | T]};
 convert_composite_elem([$] | T], Elems, false) ->
 	{hd(Elems), [$] | T]};
 convert_composite_elem([$} | T], Elems, true) ->
-	{{union, Elems}, [$} | T]};
+	{{union, lists:reverse(Elems)}, [$} | T]};
 convert_composite_elem([$} | T], Elems, false) ->
 	{hd(Elems), [$} | T]};
 convert_composite_elem([$( | T], Elems, Is_union) ->
@@ -1797,7 +1848,7 @@ convert_composite_elem([$( | T], Elems, Is_union) ->
 convert_composite_elem([$| | T], Elems, _Is_union) ->
 	convert_composite_elem(T, Elems, true);
 convert_composite_elem([$, | T], Elems, true) ->
-	{{union, Elems}, [$, | T]};
+	{{union, lists:reverse(Elems)}, [$, | T]};
 convert_composite_elem([$, | T], Elems, false) ->
 	{hd(Elems), [$, | T]};
 convert_composite_elem(Ret_val_str, Elems, Is_union) ->
@@ -1861,6 +1912,7 @@ convert_single_elem("maybe_improper_list" ++ T) ->
 convert_single_elem([H | T]) when (H >= 48) and (H =< 57) ->
 	convert_literal_number(T, [H]).
 
+
 convert_atom([$' | T], Buf) ->
 	Atom_val_in_str = lists:reverse(Buf),
 	Atom_val = list_to_atom(Atom_val_in_str),
@@ -1898,6 +1950,7 @@ convert_lst([$] | T], Prop_sec) ->
 convert_lst(Ret_val_in_str, Prop_sec) ->
 	{Lst_elems, Str_after_conv} = convert_composite_elem(Ret_val_in_str, [], false),
 	convert_lst(Str_after_conv, [Lst_elems | Prop_sec]).
+
 
 convert_tuple([$} | T], Rev_elems) ->
 	Tuple_elems = lists:reverse(Rev_elems),
@@ -2581,6 +2634,10 @@ ge(Elems) ->
 	Gen_elems.
 
 ctr(Mod_name) ->
+	improve_typer_res(Mod_name).
+
+
+convert_back_and_forth(Mod_name) ->
 	improve_typer_res(Mod_name).
 
 
