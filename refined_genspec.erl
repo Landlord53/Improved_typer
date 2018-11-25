@@ -1526,17 +1526,6 @@ are_matching_unions(Union1, Union2) ->
 		false -> false;
 		_     -> is_ls_union_match_to_rs_union(Union2, Union1, Are_ls_union_match)
 	end.
-
-
-is_subset_union({union, []}, _Union2) ->
-	true;
-is_subset_union({union, [Elem | Elems]}, Union2) ->
-	Is_match = is_union_match(Union2, Elem),
-
-	case Is_match of
-		true -> is_subset_union({union, Elems}, Union2);
-		_    -> false 
-	end. 
 	
 
 are_matching_types({any, []}, _Tp2) ->
@@ -1883,6 +1872,17 @@ is_exact_subset([Elem | Elems], Super_set) ->
 		true -> is_exact_subset(Elems, Super_set);
 		_    -> false
 	end.
+
+
+is_subset_union({union, []}, _Supset_union) ->
+	true;
+is_subset_union({union, [Elem | Elems]}, Supset_union) ->
+	Is_match = is_union_match(Supset_union, Elem),
+
+	case Is_match of
+		true -> is_subset_union({union, Elems}, Supset_union);
+		_    -> false 
+	end. 
 
 
 is_subset(_Elem1, []) ->
