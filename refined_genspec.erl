@@ -1496,11 +1496,11 @@ obtain_pats_tp([Pat_expr | Pat_exprs], Vars) ->
 	{Pat, _Upd_vars} = infer_expr_tp(Pat_expr, Vars, []),	
 	[Pat | obtain_pats_tp(Pat_exprs, Vars)].	  
 
+
 is_union_match({union, []}, _Elem2) ->
 	false;
 is_union_match({union, [Elem1 | Elems]}, Elem2) ->
 	Is_matching = are_matching_types(Elem1, Elem2),
-
 	case Is_matching of
 		false       -> is_union_match({union, Elems}, Elem2);
 		Is_matching -> Is_matching
@@ -1518,6 +1518,7 @@ is_ls_union_match_to_rs_union({union, [Elem1 | Elems1]}, {union, Elems2}, Status
 		true     -> is_ls_union_match_to_rs_union({union, Elems1}, {union, Elems2}, Status)
 	end. 
 
+
 are_matching_unions(Union1, Union2) ->
 	Are_ls_union_match = is_ls_union_match_to_rs_union(Union1, Union2, true),
 
@@ -1525,6 +1526,17 @@ are_matching_unions(Union1, Union2) ->
 		false -> false;
 		_     -> is_ls_union_match_to_rs_union(Union2, Union1, Are_ls_union_match)
 	end.
+
+
+is_subset_union({union, []}, _Union2) ->
+	true;
+is_subset_union({union, [Elem | Elems]}, Union2) ->
+	Is_match = is_union_match(Union2, Elem),
+
+	case Is_match of
+		true -> is_subset_union({union, Elems}, Union2);
+		_    -> false 
+	end. 
 	
 
 are_matching_types({any, []}, _Tp2) ->
@@ -1691,7 +1703,6 @@ extract_expr_vals([Expr | Exprs], Vars, Call_stack) ->
 		            {[Var | Vals], Upd_vars2};
 		_        -> {Gen_expr_tp, Upd_vars} = infer_expr_tp(Expr, Vars, Call_stack), 
 					{Vals, Upd_vars2} = extract_expr_vals(Exprs, Upd_vars, Call_stack),
-					%erlang:display(Gen_expr_tp),
 					{[Gen_expr_tp | Vals], Upd_vars2}		
 	end.
 
@@ -1717,7 +1728,6 @@ construct_tuple([], _Vars, _Call_stack) -> [];
 construct_tuple(Tuple, Vars, Call_stack) ->
 	Children = ?Query:exec(Tuple, ?Expr:children()),
 	{Tuple_elems_in_lst, Upd_vars} = extract_expr_vals(Children, Vars, Call_stack),
-	%erlang:display(Tuple_elems_in_lst),
 	{list_to_tuple(Tuple_elems_in_lst), Upd_vars}.
 
 
@@ -1783,16 +1793,105 @@ improve_typer_ret_val(Mod_name, Fun_name, Arity, Args_sec, Ret_tp_in_str) ->
 	Improved_ret_tp = 
 		case Typer_ret_tp of
 			{none, []} -> {none, []};
-			_          -> Referl_ret_tp = infer_fun_type(Mod_name, Fun_name, Arity, []),
-						  filter_vals_beyond_thereach(Referl_ret_tp, Typer_ret_tp)
+			_          -> Re_ret_tp = infer_fun_type(Mod_name, Fun_name, Arity, []),
+						  filter_typer_res(Typer_ret_tp, Re_ret_tp)
 		end,
-	 
 	Res_in_typer_format = convert_elem_to_tf(Improved_ret_tp),
-	"-spec " ++ Fun_name ++ Args_sec ++ " -> " ++ Res_in_typer_format ++ ".".
+	"-spec " ++ atom_to_list(Fun_name) ++ Args_sec ++ " -> " ++ Res_in_typer_format ++ ".".
 
 
-filter_vals_beyond_thereach(Referl_ret_tp, Typer_ret_tp) ->
-	Referl_ret_tp.
+filter_typer_res(Typer_res, {any, []}) ->
+	Typer_res;
+filter_typer_res({union, Elems1}, {union, Elems2}) ->
+	Filtered_elems = filter_elems(Elems1, Elems2, []),
+
+	case length(Filtered_elems) of
+		1 -> hd(Filtered_elems);
+		_ -> {union, Filtered_elems}
+	end;
+filter_typer_res({union, Elems1}, {Tp2, Elems2}) ->
+	Filtered_elems = filter_elems(Elems1, [{Tp2, Elems2}], []),
+
+	case length(Filtered_elems) of
+		1 -> hd(Filtered_elems);
+		_ -> {union, Filtered_elems}
+	end;
+filter_typer_res(Typer_res, Re_res) ->
+	Filtered_elems = filter_elems([Typer_res], [Re_res], []),
+
+	case length(Filtered_elems) of
+		1 -> hd(Filtered_elems);
+		_ -> {union, Filtered_elems}
+	end.
+
+
+filter_elems([], _Referl_res, Filtered_elems) ->
+	lists:reverse(Filtered_elems);
+filter_elems([{empty_list, []} | Typer_res], Re_res, Filtered_elems) ->
+	filter_elems(Typer_res, Re_res, [{empty_list, []} | Filtered_elems]);
+filter_elems([{Tp1, [{any, []}]} | Typer_res], Re_res, Filtered_elems) when (Tp1 == nonempty_maybe_improper_list)
+												                         or (Tp1 == maybe_improper_list) ->
+	filter_elems(Typer_res, Re_res, [{Tp1, [{any, []}]} | Filtered_elems]);
+filter_elems([{Typer_lst_tp, Typer_lst_elems} | Typer_res], Re_res, Filtered_elems) when (Typer_lst_tp == nonempty_list) 
+                                                                                      or (Typer_lst_tp == list) 
+												                                      or (Typer_lst_tp == nonempty_improper_list) 
+												                                      or (Typer_lst_tp == nonempty_maybe_improper_list) 
+												                                      or (Typer_lst_tp == maybe_improper_list) -> 
+    Re_lst = find_lst_among_elems(Re_res),
+
+    case Re_lst of
+    	[]                         -> filter_elems(Typer_res, Re_res, [{Typer_lst_tp, Typer_lst_elems} | Filtered_elems]);
+    	{Re_lst_tp, Re_lst_elems}  -> case is_exact_subset(Re_lst_elems, Typer_lst_elems) of
+					   	                  true  -> filter_elems(Typer_res, Re_res, [{Re_lst_tp, Re_lst_elems} | Filtered_elems]);
+					    	              false -> filter_elems(Typer_res, Re_res, [{Typer_lst_tp, Typer_lst_elems} | Filtered_elems])
+					                  end
+    end;
+filter_elems([{tuple, Typer_tuple_elems} | Typer_res], Re_res, Filtered_elems) ->
+	Tuple_elems_num = length(Typer_tuple_elems),
+	Re_tuple = find_tuple_among_elems(Re_res, Tuple_elems_num),
+
+	case Re_tuple of
+		[] -> filter_elems(Typer_res, Re_res, [{tuple, Typer_tuple_elems} | Filtered_elems]);
+		_  -> Filtered_tuple = filter_tuple({tuple, Typer_tuple_elems}, Re_tuple, []),
+		      filter_elems(Typer_res, Re_res, [Filtered_tuple | Filtered_elems])
+    end; 
+filter_elems([Elem1 | Elems1], Elems2, Filtered_elems) ->
+	case is_subset(Elem1, Elems2) of
+		false -> filter_elems(Elems1, Elems2, Filtered_elems);
+		_     -> filter_elems(Elems1, Elems2, [Elem1 | Filtered_elems])
+	end.
+
+
+filter_tuple({tuple, []}, {tuple, []}, Filtered_elems) ->
+	{tuple, lists:reverse(Filtered_elems)};
+filter_tuple({tuple, [Elem1 | Elems1]}, {tuple, [Elem2 | Elems2]}, Filtered_elems) ->
+	Filtered_elem = filter_typer_res(Elem1, Elem2),
+	filter_tuple({tuple, Elems1}, {tuple, Elems2}, [Filtered_elem | Filtered_elems]).
+
+
+is_exact_subset([], _Super_set) ->
+	true;
+is_exact_subset([{union, U_elems1} | Elems1], [{union, U_elems2} | Elems2]) ->
+	Is_subset_union = is_subset_union({union, U_elems1}, {union, U_elems2}),
+
+	case Is_subset_union of
+		true -> is_exact_subset(Elems1, Elems2);
+		_    -> false
+	end;
+is_exact_subset([Elem | Elems], Super_set) ->
+	case is_subset(Elem, Super_set) of
+		true -> is_exact_subset(Elems, Super_set);
+		_    -> false
+	end.
+
+
+is_subset(_Elem1, []) ->
+	false;
+is_subset(Elem1, [Elem2 | Elems2]) ->
+	case are_matching_types(Elem1, Elem2) of
+		false -> is_subset(Elem1, Elems2);
+		Res   -> Res
+	end.
 
 
 %tf - typer format
