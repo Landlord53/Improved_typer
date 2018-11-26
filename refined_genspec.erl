@@ -1092,16 +1092,29 @@ compute_prefix_expr({Tp, []}, 'bnot') when (Tp == neg_integer)     or (Tp == pos
 	{integer, []};
 compute_prefix_expr({Tp, []}, 'bnot') when (Tp == number) or (Tp == any) ->
 	{number, []};
-
 compute_prefix_expr({_Tp, _Val}, _Operation) ->
 	{none, []}.
 
+
 compute_infix_expr(Tp1, Tp2, _Operation) when (Tp1 == {none, []}) or (Tp2 == {none, []}) ->
 	{none, []};
+
+compute_infix_expr({any, []}, {any, []}, '++') ->
+	{list, [{any, []}]};
+compute_infix_expr(Lst1, Lst2, '++') when (Lst1 == {any, []}) or (Lst2 == {any, []}) ->
+	{nonempty_maybe_improper_list, [{any, []}]};
+compute_infix_expr({any, []}, {empty_list, []}, '++') ->
+	{list, [{any, []}]};
+compute_infix_expr({empty_list, []}, {any, []}, '++') ->
+	{any, []};
+compute_infix_expr(Lst1, Lst2, '++') ->
+	{Concat_op_res, _} = generalize_elems([Lst1, Lst2], []),
+	erlang:display(Concat_op_res),
+	Concat_op_res;
+
 compute_infix_expr({union, Union_elems1}, {union, Union_elems2}, Operation) -> 
 	Two_unions_merged = [compute_infix_expr(Union_elem1, Union_elem2, Operation) || 
 							Union_elem1 <- Union_elems1, Union_elem2 <- Union_elems2],
-
 	{union, lists:usort(Two_unions_merged)};
 compute_infix_expr({union, Union_elems}, Expr2, Operation) -> 
 	{union, lists:map(fun(Expr1) -> compute_infix_expr(Expr1, Expr2, Operation) end, Union_elems)};
@@ -2200,59 +2213,59 @@ compute_arity_args_ret_tp([H | T], List, Tupple, Fun, Binary, Arity, Args) ->
 	
 %----------------------------Tests------------------------------------------------------------------------
 test() ->
-	Test1 = infer_fun_type(unit_test, af1, 0, []),
-	erlang:display({test1, af1, Test1 == [{integer, [305]}]}),
+%	Test1 = infer_fun_type(unit_test, af1, 0, []),
+%	erlang:display({test1, af1, Test1 == [{integer, [305]}]}),
 
-	Test2 = infer_fun_type(unit_test, af2, 0, []),
-	erlang:display({test2, af2, Test2 == [{integer, [7]}]}),
+%	Test2 = infer_fun_type(unit_test, af2, 0, []),
+%	erlang:display({test2, af2, Test2 == [{integer, [7]}]}),
 
-	Test3 = infer_fun_type(unit_test, af3, 0, []),
-	erlang:display({test3, af3, Test3 == [{integer, [3]}]}),
+%	Test3 = infer_fun_type(unit_test, af3, 0, []),
+%	erlang:display({test3, af3, Test3 == [{integer, [3]}]}),
 
-	Test4 = infer_fun_type(unit_test, af3_2, 0, []),
-	erlang:display({test4, af3_2, Test4 == [{integer, [3]}]}),
+%	Test4 = infer_fun_type(unit_test, af3_2, 0, []),
+%	erlang:display({test4, af3_2, Test4 == [{integer, [3]}]}),
 
-	Test5 = infer_fun_type(unit_test, af3_3, 0, []),
-	erlang:display({test5, af3_3, Test5 == [{number,[]}]}),
+%	Test5 = infer_fun_type(unit_test, af3_3, 0, []),
+%	erlang:display({test5, af3_3, Test5 == [{number,[]}]}),
 
-	Test6 = infer_fun_type(unit_test, af4_2, 0, []),
-	erlang:display({test6, af4_2, Test6 == [{integer, [3]}]}),
+%	Test6 = infer_fun_type(unit_test, af4_2, 0, []),
+%	erlang:display({test6, af4_2, Test6 == [{integer, [3]}]}),
 
 	Test7 = infer_fun_type(unit_test, lfac_2, 0, []),
-	erlang:display({test7, lfac_2, Test7 == [{union,[{integer,[1]},{integer,[2]}]}]}),
+	erlang:display({test7, lfac_2, Test7 == {union,[{integer,[1]},{integer,[2]}]}}),
 
 	Test8 = infer_fun_type(unit_test, lfac2_2, 0, []),
-	erlang:display({test8, lfac2_2, Test8 == [{atom,[ok]}]}),
+	erlang:display({test8, lfac2_2, Test8 == {atom,[ok]}}),
 
 	Test9 = infer_fun_type(unit_test, lfac3_3, 1, []),
-	erlang:display({test9, lfac3_3, Test9 == [{atom,[ok]}]}),
+	erlang:display({test9, lfac3_3, Test9 == {atom,[ok]}}),
 
 	Test10 = infer_fun_type(unit_test, lfac4_4, 0, []),
-	erlang:display({test10, lfac4_4, Test10 == [{atom,[ok]}]}),
+	erlang:display({test10, lfac4_4, Test10 == {atom,[ok]}}),
 
 	Test11 = infer_fun_type(unit_test, lfac5_5, 0, []),
-	erlang:display({test11, lfac5_5, Test11 == [{atom,[ok]}]}),
+	erlang:display({test11, lfac5_5, Test11 == {atom,[ok]}}),
 
 	Test12 = infer_fun_type(unit_test, lfac7_7, 0, []),
-	erlang:display({test12, lfac7_7, Test12 == [{atom,[ok]}]}),
+	erlang:display({test12, lfac7_7, Test12 == {atom,[ok]}}),
 
 	Test13 = infer_fun_type(unit_test, ei1, 0, []),
-	erlang:display({test13, ei1, Test13 == [{nonempty_list,[{union,[{integer,[1]},{integer,[2]},{integer,[4]}]}]}]}),
+	erlang:display({test13, ei1, Test13 == {nonempty_list,[{union,[{integer,[1]},{integer,[2]},{integer,[4]}]}]}}),
 
 	Test14 = infer_fun_type(unit_test, ei2, 0, []),
-	erlang:display({test14, ei2, Test14 == [{nonempty_list,[{union,[{integer,[1]},{integer,[2]},{nonempty_list,[{union,[{integer,[1]},{integer,[2]},{integer,[3]}]}]}]}]}]}),
+	erlang:display({test14, ei2, Test14 == {nonempty_list,[{union,[{integer,[1]},{integer,[2]},{nonempty_list,[{union,[{integer,[1]},{integer,[2]},{integer,[3]}]}]}]}]}}),
 
 	Test15 = infer_fun_type(unit_test, ei3, 0, []),
-	erlang:display({test15, ei3, Test15 == [{tuple,[{nonempty_list,[{union,[{integer,[1]},{integer,[2]}]}]},{nonempty_list,[{union,[{integer,[3]},{integer,[4]}]}]}]}]}),
+	erlang:display({test15, ei3, Test15 == {tuple,[{nonempty_list,[{union,[{integer,[1]},{integer,[2]}]}]},{nonempty_list,[{union,[{integer,[3]},{integer,[4]}]}]}]}}),
 
 	Test16 = infer_fun_type(unit_test, ei4, 0, []),
-	erlang:display({test16, ei4, Test16 == [{nonempty_list,[{union,[{integer,[1]},{integer,[2]}]}]}]}),
+	erlang:display({test16, ei4, Test16 == {nonempty_list,[{union,[{integer,[1]},{integer,[2]}]}]}}),
 
 	Test17 = infer_fun_type(unit_test, ei5, 0, []),
-	erlang:display({test17, ei5, Test17 == [{nonempty_improper_list,[{integer,[1]},{integer,[2]}]}]}),
+	erlang:display({test17, ei5, Test17 == {nonempty_improper_list,[{integer,[1]},{integer,[2]}]}}),
 
 	Test18 = infer_fun_type(unit_test, ei6, 1, []),
-	erlang:display({test18, ei6, Test18 == [{nonempty_maybe_improper_list,[{any, []}]}]}),
+	erlang:display({test18, ei6, Test18 == {nonempty_maybe_improper_list,[{any, []}]}}),
 
 	%Test19 = infer_fun_type(unit_test, pm, 0, []),
 	%erlang:display({test19, pm, Test19 == [{integer,[3]}]}),
@@ -2683,65 +2696,64 @@ test() ->
 									          {tuple,[{integer,[5]},{integer,[6]},{integer,[7]}]}]}]}}),
 
 	Test65 = infer_fun_type(unit_test, cons_bound, 1, []),
-	erlang:display({test65, cons_bound, Test65 == [{any, []}]}),
+	erlang:display({test65, cons_bound, Test65 == {any, []}}),
 
 	Test66 = infer_fun_type(unit_test, cons_bound2, 1, []),
-	erlang:display({test66, cons_bound2, Test66 == [{any, []}]}),
+	erlang:display({test66, cons_bound2, Test66 == {any, []}}),
 
 	Test67 = infer_fun_type(unit_test, cons_bound3, 1, []),
-	erlang:display({test67, cons_bound3, Test67 == [{number, []}]}),
+	erlang:display({test67, cons_bound3, Test67 == {number, []}}),
 
 	Test68 = infer_fun_type(unit_test, cons_bound4, 0, []),
-	erlang:display({test68, cons_bound4, Test68 == [{integer, [2]}]}),
+	erlang:display({test68, cons_bound4, Test68 == {integer, [2]}}),
 
 	Test69 = infer_fun_type(unit_test, cons_bound5, 0, []),
-	erlang:display({test69, cons_bound5, Test69 == [{integer, [87]}]}),
+	erlang:display({test69, cons_bound5, Test69 == {integer, [87]}}),
 
 	Test70 = infer_fun_type(unit_test, cons_bound6, 0, []),
-	erlang:display({test70, cons_bound6, Test70 == [{union,
-												     [{nonempty_improper_list,
-												          [{union,[{integer,[1]},{integer,[2]}]},{integer,[3]}]},
-												      {integer,[3]}]}]}),
+	erlang:display({test70, cons_bound6, Test70 == {union,
+												     [{integer,[3]}, {nonempty_improper_list,
+												          [{union,[{integer,[1]},{integer,[2]}]},{integer,[3]}]}]}}),
 
 	Test71 = infer_fun_type(unit_test, cons_bound7, 0, []),
-	erlang:display({test71, cons_bound7, Test71 == [{list,[{union,[{integer,[1]},
+	erlang:display({test71, cons_bound7, Test71 == {list,[{union,[{integer,[1]},
 										                {integer,[2]},
-										                {integer,[3]}]}]}]}),
+										                {integer,[3]}]}]}}),
 
 	Test72 = infer_fun_type(unit_test, cons_bound8, 0, []),
-	erlang:display({test72, cons_bound8, Test72 == [{union,[{integer,[1]},{integer,[2]}]}]}),
+	erlang:display({test72, cons_bound8, Test72 == {union,[{integer,[1]},{integer,[2]}]}}),
 
 	Test77 = infer_fun_type(unit_test, cons_bound9, 0, []),
-	erlang:display({test77, cons_bound9, Test77 == [{tuple,[{integer,[1]},{integer,[2]},{integer,[3]}]}]}),
+	erlang:display({test77, cons_bound9, Test77 == {tuple,[{integer,[1]},{integer,[2]},{integer,[3]}]}}),
 
 %Tuple bound
 
 	Test73 = infer_fun_type(unit_test, tuple_bound, 0, []),
-	erlang:display({test73, tuple_bound, Test73 == [{integer,[1]}]}),
+	erlang:display({test73, tuple_bound, Test73 == {integer,[1]}}),
 
 	Test74 = infer_fun_type(unit_test, tuple_bound2, 0, []),
-	erlang:display({test74, tuple_bound2, Test74 == [{integer,[1]}]}),
+	erlang:display({test74, tuple_bound2, Test74 == {integer,[1]}}),
 
 	Test75 = infer_fun_type(unit_test, tuple_bound3, 0, []),
-	erlang:display({test75, tuple_bound3, Test75 == [{tuple,[{integer,[4]},{integer,[5]}]}]}),
+	erlang:display({test75, tuple_bound3, Test75 == {tuple,[{integer,[4]},{integer,[5]}]}}),
 
 	Test76 = infer_fun_type(unit_test, tuple_bound4, 1, []),
-	erlang:display({test76, tuple_bound4, Test76 == [{tuple,[{any,[]},{integer,[5]}]}]}),
+	erlang:display({test76, tuple_bound4, Test76 == {tuple,[{any,[]},{integer,[5]}]}}),
 
 	Test78 = infer_fun_type(unit_test, match_expr, 1, []),
-	erlang:display({test78, match_expr, Test78 == [{integer,[4]}]}),
+	erlang:display({test78, match_expr, Test78 == {integer,[4]}}),
 
 	Test79 = infer_fun_type(unit_test, cons_bound10, 0, []),
-	erlang:display({test79, cons_bound10, Test79 == [{tuple,[{integer,[3]},{integer,[4]},{integer,[5]}]}]}),
+	erlang:display({test79, cons_bound10, Test79 == {tuple,[{integer,[3]},{integer,[4]},{integer,[5]}]}}),
 
 	Test80 = infer_fun_type(unit_test, cl_mat, 0, []),
-	erlang:display({test80, cl_mat, Test80 == [{atom,[horoso]}]}),
+	erlang:display({test80, cl_mat, Test80 == {atom,[horoso]}}),
 
 	Test81 = infer_fun_type(unit_test, cl_mat2, 1, []),
-	erlang:display({test81, cl_mat2, Test81 == [{atom,[eror]}]}),
+	erlang:display({test81, cl_mat2, Test81 == {atom,[eror]}}),
 
 	Test82 = infer_fun_type(unit_test, cl_mat3, 1, []),
-	erlang:display({test82, cl_mat3, Test82 == [{atom,[ok]}]}).
+	erlang:display({test82, cl_mat3, Test82 == {atom,[ok]}}).
 
 
 
