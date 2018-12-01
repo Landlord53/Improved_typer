@@ -88,7 +88,7 @@ get_clauses_type([], [], _Call_stack, Res) ->
 	[Clauses_gen_tp];
 	%Res;
 get_clauses_type([Clause | Clauses], [Clause_vars | All_vars], Call_stack, Res) ->
-	Clause_tp = get_clause_type(Clause, Clause_vars, Call_stack),
+	{Clause_tp, _Upd_vars} = get_clause_type(Clause, Clause_vars, Call_stack),
 
 	case Clause_tp of
 		[] -> get_clauses_type(Clauses, All_vars, Call_stack, Res);
@@ -96,19 +96,19 @@ get_clauses_type([Clause | Clauses], [Clause_vars | All_vars], Call_stack, Res) 
 	end.
 
 
-define_bodies_type([], _, _Call_stack) -> [];
+define_bodies_type([], Vars, _Call_stack) -> {[], Vars};
 define_bodies_type([Last_body], Vars, Call_stack) ->
-	{Clause_type, _Upd_vars} = infer_expr_tp(Last_body, Vars, Call_stack),
+	{Clause_type, Upd_vars} = infer_expr_tp(Last_body, Vars, Call_stack),
 
 	case Clause_type of
-		{none, []} -> [];
-		_          -> Clause_type
+		{none, []} -> {[], Upd_vars};
+		_          -> {Clause_type, Upd_vars}
 	end;
 define_bodies_type([Body | Bodies], Vars, Call_stack) ->
 	{Body_type, Upd_vars} = infer_expr_tp(Body, Vars, Call_stack),
 
 	case Body_type of
-		{none, []} -> [];
+		{none, []} -> {[], Upd_vars};
 		_          -> define_bodies_type(Bodies, Upd_vars, Call_stack)
 	end.         
 	
@@ -117,6 +117,8 @@ define_bodies_type([Body | Bodies], Vars, Call_stack) ->
 
 infer_expr_tp(Expr, Vars, Call_stack) ->
 	case ?Expr:type(Expr) of
+		if_expr         -> infer_if_expr(Expr, Vars, Call_stack);
+		case_expr       -> infer_case_expr(Expr, Vars, Call_stack);
 		prefix_expr     -> {infer_prefix_expr_type(Expr, ?Expr:value(Expr), Vars, Call_stack), Vars};
 		match_expr      -> infer_match_expr_inf(Expr, Vars, Call_stack);
 		infix_expr      -> {infer_infix_expr_type(Expr, ?Expr:value(Expr), Vars, Call_stack), Vars};
@@ -130,6 +132,88 @@ infer_expr_tp(Expr, Vars, Call_stack) ->
 		implicit_fun    -> {infer_implicit_fun_expr(Expr, Vars), Vars};
 		_Simple_type    -> {infer_simple_type(Expr), Vars}
 	end.
+
+infer_if_expr(If_expr, Vars, Call_stack) ->
+	Clause_exprs = ?Query:exec(If_expr, [exprcl]),
+	{Clauses_tp, Upd_vars} = infer_if_clauses(Clause_exprs, Vars, Call_stack, [], []),
+	{{any, []}, Vars}.
+
+
+infer_if_clauses([Clause_expr | Clause_exprs], Vars, Call_stack, Clauses_tp, Clauses_vars) ->
+	Guard =
+	    case ?Query:exec(Clause_expr, ?Clause:guard()) of
+	    	[]      -> [];
+	    	[Guard_expr] -> Guard_expr
+	    end.
+
+%	case filter_clause_by_guards(Guard, Vars) of
+%		false    -> infer_if_clauses(Clause_exprs, Vars, Call_stack, Clauses_tp, Clauses_vars);
+%		possibly ->  
+
+
+infer_case_expr(Case_expr, Vars, Call_stack) ->
+	Head_expr = ?Query:exec(Case_expr, [headcl]),
+	Clauses_exprs = ?Query:exec(Case_expr, [exprcl]),
+	{Head_tp, Upd_vars} = get_clause_type(Head_expr, Vars, Call_stack),
+	{Clauses_tp, Upd_vars2} = infer_case_clauses(Clauses_exprs, Head_tp, Upd_vars, Call_stack, [], []),
+	{Clauses_tp, Upd_vars2}.
+
+
+infer_case_clauses([], _Head_tp, Vars, _Call_stack, Clauses_tp, Clauses_vars) ->
+	Upd_vars = Vars ++ Clauses_vars, 
+	Case_clause_tp = 
+		case length(Clauses_tp) of
+			0 -> {none, []};
+			1 -> hd(Clauses_tp);
+			_ -> {union, Clauses_tp}
+		end,
+
+	{Case_clause_tp, Upd_vars};
+infer_case_clauses([Clause_expr | Clause_exprs], Head_tp, Vars, Call_stack, Clauses_tp, Clauses_vars) ->
+	Clause_pat_expr = get_patterns(Clause_expr),
+
+	Guard =
+	    case ?Query:exec(Clause_expr, ?Clause:guard()) of
+	    	[]      -> [[]];
+	    	Guard_expr -> Guard_expr
+	    end,
+
+	Clause = filter_clauses([Clause_pat_expr], [Head_tp], Guard),
+
+	case Clause of
+		[]                        -> infer_case_clauses(Clause_exprs, Head_tp, Vars, Call_stack, Clauses_tp, Clauses_vars);
+		[{Clause_expr, Upd_vars}] -> {Clause_tp, Upd_vars2} = get_clause_type(Clause_expr, Upd_vars, Call_stack),
+
+		                             {Clause_pat_expr_tp, _} = infer_expr_tp(hd(Clause_pat_expr), Upd_vars, Call_stack),
+		                             Are_matching_types = are_matching_types(Clause_pat_expr_tp, Head_tp),
+
+		                             case {Are_matching_types, Clause_tp} of
+		                             	  {_, []}       -> infer_case_clauses(Clause_exprs, Head_tp, Vars, Call_stack, Clauses_tp, Clauses_vars);
+		                                  {true, _}     -> Clause_var = Upd_vars2 -- Vars,
+		                                                   Upd_clauses_vars = unite_case_clauses_vars(Clause_var, Clauses_vars),
+		                                                   infer_case_clauses([], Head_tp, Vars, Call_stack, [Clause_tp | Clauses_tp], Upd_clauses_vars);
+                                          {possibly, _} -> Clause_var = Upd_vars2 -- Vars,
+		                                                   Upd_clauses_vars = unite_case_clauses_vars(Clause_var, Clauses_vars),
+		                                                   infer_case_clauses(Clause_exprs, Head_tp, Vars, Call_stack, [Clause_tp | Clauses_tp], Upd_clauses_vars)
+		                             end
+    end.
+
+
+unite_case_clauses_vars([], Clauses_vars) ->
+	Clauses_vars;
+unite_case_clauses_vars([Var | Vars], Clauses_vars) ->
+	Upd_clauses_vars = unite_case_clauses_var(Var, Clauses_vars),
+	unite_case_clauses_vars(Vars, Upd_clauses_vars).
+
+
+unite_case_clauses_var(Clause_var = {Var_name, [Val]}, Clauses_vars) ->
+	case lists:keyfind(Var_name, 1, Clauses_vars) of
+		false                          -> [Clause_var | Clauses_vars];
+		{Var_name, [{union, [Elems]}]} -> Upd_var = {Var_name, [Val | Elems]},
+                                          lists:keyreplace(Var_name, 1, Clauses_vars, Upd_var);                                   
+		{Var_name, [Matched_var_val]}  -> Upd_var = {Var_name, [{union, [Val, Matched_var_val]}]},
+                                          lists:keyreplace(Var_name, 1, Clauses_vars, Upd_var)
+	end. 
 
 
 infer_implicit_fun_expr(Implicit_fun_expr, _Vars) ->
@@ -162,7 +246,6 @@ infer_simple_type(Expr) ->
 
 construct_and_convert_cons_to_cf(Cons_expr, Vars, Call_stack) ->
 	{Lst, Upd_vars} = construct_list_from_cons_expr(Cons_expr, Vars, Call_stack),
-	%erlang:display(Lst),
 	{convert_value_in_basic_format_to_compound(Lst), Upd_vars}.
 
 
@@ -451,9 +534,10 @@ bound_var_to_expr_tp(Var_name, Expr, Vars, Call_stack) ->
 bound_var_to_value(Var_name, Value, Vars) ->
 	Is_bounded = is_bounded(Var_name, Vars),
 
+
 	case Is_bounded of
-		true  -> Upd_vars2 = replace_shadowed_vars_val(Value, Vars, []),
-		         {Value, Upd_vars2};
+		true  -> %Upd_vars2 = replace_shadowed_vars_val({Var_name, [Value]}, Vars, []),
+		         {Value, Vars};
 		false -> New_var = {Var_name, [Value]},
 		         {Value, [New_var | Vars]}
 	end.
@@ -508,15 +592,15 @@ bound_cons_vars({Lst_tp, [{variable, [Var_name]} | T]}, Rs_cons_tp, Vars) ->
 	New_var = bound_cons_var({Lst_tp, [{variable, [Var_name]}]}, Rs_cons_tp),
 
 	case is_bounded(Var_name, Vars) of
-		true  -> Upd_vars = replace_shadowed_vars_val(New_var, Vars, []),
-		         bound_cons_vars({Lst_tp, T}, Rs_cons_tp, Upd_vars);
+		true  -> %Upd_vars = replace_shadowed_vars_val(New_var, Vars, []),
+		         bound_cons_vars({Lst_tp, T}, Rs_cons_tp, Vars);
 		false -> bound_cons_vars({Lst_tp, T}, Rs_cons_tp, [New_var | Vars])
 	end;
 bound_cons_vars(Rs_cons = {_Lst_tp, [{'...', [Var_name]}]}, Rs_cons_tp, Vars) ->
 	New_var = bound_cons_var(Rs_cons, Rs_cons_tp),
 	case is_bounded(Var_name, Vars) of
-		true  -> Upd_vars = replace_shadowed_vars_val(New_var, Vars, []),
-		         {Rs_cons_tp, Upd_vars};
+		true  -> %Upd_vars = replace_shadowed_vars_val(New_var, Vars, []),
+		         {Rs_cons_tp, Vars};
 		false -> {Rs_cons_tp, [New_var | Vars]}
 	end;
 bound_cons_vars({_Lst_tp, {_Elem_tp, _Elem_Val}}, Rs_cons_tp, Vars) ->
@@ -546,7 +630,6 @@ generalize_elems([], Elems_tbl) ->
 %	{{any, []}, Elems_tbl};
 generalize_elems([Elem | Elems], Elems_tbl) ->
 	Upd_elems_tbl = upd_elems_tbl_with_new_elem(Elem, Elems_tbl),
-	%erlang:display(Upd_elems_tbl),
 	generalize_elems(Elems, Upd_elems_tbl).
 
 
@@ -854,6 +937,8 @@ upd_bools_sec({boolean, [Val]}, {bools, [{boolean, [Val]}]}) ->
 upd_bools_sec({boolean, [false]}, {bools, [{boolean, [true]}]}) ->
 	{bools, [{boolean, []}]};
 upd_bools_sec({boolean, [true]}, {bools, [{boolean, [false]}]}) ->
+	{bools, [{boolean, []}]};
+upd_bools_sec({boolean, []}, _) ->
 	{bools, [{boolean, []}]}.
 
 
@@ -998,8 +1083,13 @@ build_lst(Lst_tp, [{lists, [{Member_lst_tp, Elems_tbl}]} | T], Res) ->
 build_lst(Lst_tp, [{_Label, Tp} | T], Res) ->
 	build_lst(Lst_tp, T, [Tp | Res]).
 
+
 generalize_lst_tp(Lst_tp, Lst_tp) ->
 	Lst_tp;
+generalize_lst_tp(list, Lst2) when (Lst2 == empty_list) or (Lst2 == nonempty_list) ->
+	list;
+generalize_lst_tp(Lst1, list) when (Lst1 == empty_list) or (Lst1 == nonempty_list) ->
+	list;
 generalize_lst_tp(undef_list, Lst2) ->
 	Lst2;
 generalize_lst_tp(Lst1, undef_list) ->
@@ -1098,7 +1188,12 @@ compute_prefix_expr({_Tp, _Val}, _Operation) ->
 
 compute_infix_expr(Tp1, Tp2, _Operation) when (Tp1 == {none, []}) or (Tp2 == {none, []}) ->
 	{none, []};
-
+compute_infix_expr({boolean, [Value1]}, {boolean, [Value2]}, ',') ->
+	{boolean, [Value1 and Value2]};
+compute_infix_expr({boolean, [Value1]}, {boolean, [Value2]}, ';') ->
+	{boolean, [Value1 or Value2]};
+compute_infix_expr(Expr1, Expr2, Operation) when (Operation == ',') or (Operation == ';') ->
+	{boolean, []};
 compute_infix_expr({any, []}, {any, []}, '++') ->
 	{list, [{any, []}]};
 compute_infix_expr(Lst1, Lst2, '++') when (Lst1 == {any, []}) or (Lst2 == {any, []}) ->
@@ -1109,7 +1204,6 @@ compute_infix_expr({empty_list, []}, {any, []}, '++') ->
 	{any, []};
 compute_infix_expr(Lst1, Lst2, '++') ->
 	{Concat_op_res, _} = generalize_elems([Lst1, Lst2], []),
-	erlang:display(Concat_op_res),
 	Concat_op_res;
 
 compute_infix_expr({union, Union_elems1}, {union, Union_elems2}, Operation) -> 
@@ -1135,45 +1229,59 @@ compute_infix_expr({boolean, [Val1]}, {boolean, [Val2]}, 'xor') ->
 	{boolean, [Val1 xor Val2]};
 compute_infix_expr({Tp1, [Val1]}, {Tp2, [Val2]}, '==') when ((Tp1 == neg_integer)     or (Tp1 == pos_integer) 
                                                           or (Tp1 == non_neg_integer) or (Tp1 == integer)
-                                                          or (Tp1 == atom)            or (Tp1 == boolean))
+                                                          or (Tp1 == atom)            or (Tp1 == boolean)
+                                                          or (Tp1 == float))
                                                         and ((Tp2 == neg_integer)     or (Tp2 == pos_integer) 
                                                           or (Tp2 == non_neg_integer) or (Tp2 == integer)
-                                                          or (Tp2 == atom)            or (Tp2 == boolean)) ->
+                                                          or (Tp2 == atom)            or (Tp2 == boolean)
+                                                          or (Tp2 == float)) ->
     {boolean, [Val1 == Val2]};
 compute_infix_expr({Tp1, [Val1]}, {Tp2, [Val2]}, '=:=') when (Tp1 == neg_integer)     or (Tp1 == pos_integer) 
                                                           or (Tp1 == non_neg_integer) or (Tp1 == integer)
-                                                          or (Tp1 == atom)            or (Tp1 == boolean) -> 
+                                                          or (Tp1 == atom)            or (Tp1 == boolean)
+                                                          or (Tp1 == float) -> 
     {boolean, [(Tp1 =:= Tp2) and (Val1 =:= Val2)]};
 compute_infix_expr({Tp1, [Val1]}, {Tp2, [Val2]}, '/=') when ((Tp1 == neg_integer)     or (Tp1 == pos_integer) 
                                                           or (Tp1 == non_neg_integer) or (Tp1 == integer)
-                                                          or (Tp1 == atom)            or (Tp1 == boolean))
+                                                          or (Tp1 == atom)            or (Tp1 == boolean)
+                                                          or (Tp1 == float))
                                                         and ((Tp2 == neg_integer)     or (Tp2 == pos_integer) 
                                                           or (Tp2 == non_neg_integer) or (Tp2 == integer)
-                                                          or (Tp2 == atom)            or (Tp2 == boolean)) ->
+                                                          or (Tp2 == atom)            or (Tp2 == boolean)
+                                                          or (Tp2 == float)) ->
     {boolean, [Val1 /= Val2]};
 compute_infix_expr({Tp1, [Val1]}, {Tp2, [Val2]}, '=/=') when (Tp1 == neg_integer) or (Tp1 == pos_integer) 
                                                           or (Tp1 == non_neg_integer) or (Tp1 == integer)
-                                                          or (Tp1 == atom) or (Tp1 == boolean) -> 
+                                                          or (Tp1 == atom) or (Tp1 == boolean)
+                                                          or (Tp1 == float) -> 
     {boolean, [(Tp1 =/= Tp2) and (Val1 =/= Val2)]};
 compute_infix_expr({Tp1, [Val1]}, {Tp2, [Val2]}, '=<') when ((Tp1 == neg_integer) or (Tp1 == pos_integer) 
-                                                          or (Tp1 == non_neg_integer) or (Tp1 == integer))
+                                                          or (Tp1 == non_neg_integer) or (Tp1 == integer)
+                                                          or (Tp1 == float))
                                                         and ((Tp2 == neg_integer) or (Tp2 == pos_integer) 
-                                                          or (Tp2 == non_neg_integer) or (Tp2 == integer)) ->
+                                                          or (Tp2 == non_neg_integer) or (Tp2 == integer)
+                                                          or (Tp2 == float)) ->
     {boolean, [Val1 =< Val2]};
 compute_infix_expr({Tp1, [Val1]}, {Tp2, [Val2]}, '<') when ((Tp1 == neg_integer) or (Tp1 == pos_integer) 
-                                                         or (Tp1 == non_neg_integer) or (Tp1 == integer))
+                                                         or (Tp1 == non_neg_integer) or (Tp1 == integer)
+                                                         or (Tp1 == float))
                                                        and ((Tp2 == neg_integer) or (Tp2 == pos_integer) 
-                                                         or (Tp2 == non_neg_integer) or (Tp2 == integer)) ->
+                                                         or (Tp2 == non_neg_integer) or (Tp2 == integer)
+                                                         or (Tp2 == float)) ->
     {boolean, [Val1 < Val2]};
 compute_infix_expr({Tp1, [Val1]}, {Tp2, [Val2]}, '>=') when ((Tp1 == neg_integer) or (Tp1 == pos_integer) 
-                                                          or (Tp1 == non_neg_integer) or (Tp1 == integer))
+                                                          or (Tp1 == non_neg_integer) or (Tp1 == integer)
+                                                          or (Tp1 == float))
                                                         and ((Tp2 == neg_integer) or (Tp2 == pos_integer) 
-                                                          or (Tp2 == non_neg_integer) or (Tp2 == integer)) ->
+                                                          or (Tp2 == non_neg_integer) or (Tp2 == integer)
+                                                          or (Tp2 == float)) ->
     {boolean, [Val1 >= Val2]};
 compute_infix_expr({Tp1, [Val1]}, {Tp2, [Val2]}, '>') when ((Tp1 == neg_integer) or (Tp1 == pos_integer) 
-                                                         or (Tp1 == non_neg_integer) or (Tp1 == integer))
+                                                         or (Tp1 == non_neg_integer) or (Tp1 == integer)
+                                                         or (Tp1 == float))
                                                        and ((Tp2 == neg_integer) or (Tp2 == pos_integer) 
-                                                         or (Tp2 == non_neg_integer) or (Tp2 == integer)) ->
+                                                         or (Tp2 == non_neg_integer) or (Tp2 == integer)
+                                                         or (Tp2 == float)) ->
     {boolean, [Val1 > Val2]};
 compute_infix_expr(_Tp1, _Tp2, Operation) when (Operation == '==') or (Operation == '/=')
 									        or (Operation == '=<') or (Operation == '<')
@@ -1443,13 +1551,13 @@ find_actual_clauses(Mod_name, Fun_name, Arity, Actual_params) ->
 		_  -> filter_clauses(Pat_exprs, Actual_params, Guards)   
 	end.
 
+
 filter_clauses([], _Pars, []) ->
 	[];
 filter_clauses([Pat_expr | Pat_exprs], Pars, [Guard | Guards]) ->
 	Upd_vars = replace_clause_params_with_args(Pat_expr, Pars, []),
 	Pat = obtain_pats_tp(Pat_expr, Upd_vars),
 	Is_pars_matched = compare_pat_with_actual_pars(Pat, Pars, true),
-	%erlang:display(),
 
 	case Is_pars_matched of
 		true -> 
@@ -1774,6 +1882,8 @@ improve_all_specs([Spec | Specs], Mod_name) ->
 	[improve_single_spec(Spec, Mod_name) | improve_all_specs(Specs, Mod_name)].
 
 
+
+
 improve_single_spec(Spec, Mod_name) ->
 	{Fun_name_in_str, Arity, Args_sec, Ret_tp_in_str} = get_fun_info(Spec, []),
 	Mod_node = ?Query:exec(?Mod:find(Mod_name)),
@@ -2024,7 +2134,8 @@ convert_composite_elem(Ret_val_str, Elems, Is_union) ->
 	{Elem, Str_after_conv} = convert_single_elem(Ret_val_str),
 	convert_composite_elem(Str_after_conv, [Elem | Elems], Is_union).	
 
-
+convert_single_elem("none()" ++ T) ->
+	{{none, []}, T};
 convert_single_elem("neg_integer()" ++ T) ->
 	{{neg_integer, []}, T};
 convert_single_elem("pos_integer()" ++ T) ->
@@ -2711,9 +2822,7 @@ test() ->
 	erlang:display({test69, cons_bound5, Test69 == {integer, [87]}}),
 
 	Test70 = infer_fun_type(unit_test, cons_bound6, 0, []),
-	erlang:display({test70, cons_bound6, Test70 == {union,
-												     [{integer,[3]}, {nonempty_improper_list,
-												          [{union,[{integer,[1]},{integer,[2]}]},{integer,[3]}]}]}}),
+	erlang:display({test70, cons_bound6, Test70 == {union,[{nonempty_improper_list,[{union,[{integer,[1]},{integer,[2]}]},{integer,[3]}]},{integer,[3]}]}}),
 
 	Test71 = infer_fun_type(unit_test, cons_bound7, 0, []),
 	erlang:display({test71, cons_bound7, Test71 == {list,[{union,[{integer,[1]},
@@ -2796,9 +2905,39 @@ ge(Elems) ->
 
 
 
+infer_fun_types_for_testing([], _Mod_name) ->
+	[];
+infer_fun_types_for_testing([Spec | Specs], Mod_name) ->
+	[infer_one_fun(Spec, Mod_name) | infer_fun_types_for_testing(Specs, Mod_name)].
 
 
+infer_one_fun(Spec, Mod_name) ->
+	{Fun_name_in_str, Arity, Args_sec, Ret_tp_in_str} = get_fun_info(Spec, []),
+	Mod_node = ?Query:exec(?Mod:find(Mod_name)),
+	Fun_name = list_to_atom(Fun_name_in_str),
 
+	Fun_tp = infer_fun_type(Mod_name, Fun_name, Arity, []),
+	Res_in_typer_format = convert_elem_to_tf(Fun_tp),
+	Res = "-spec " ++ atom_to_list(Fun_name) ++ Args_sec ++ " -> " ++ Res_in_typer_format ++ ".",
+	io:fwrite("~p~n", [Res]).
+
+start_testing(Mod_name) ->
+	Mod_node_in_lst = ?Query:exec(?Mod:find(Mod_name)),
+
+	Mod_node = 
+		case Mod_node_in_lst of
+			[]    -> [];
+			[Res] -> Res 
+		end,
+
+	[File_node] = ?Query:exec(Mod_node, ?Mod:file()),
+	Path = ?File:path(File_node),
+	Spec = os:cmd("typer " ++ [$" | Path] ++ "\""),
+	RE = lists:concat(["-spec ", ".+\."]),
+	{_, Capture} = re:run(Spec, RE, [global, {capture, all, list}]),
+	Specs = extract_matches(Capture),
+
+	infer_fun_types_for_testing(Specs, Mod_name).
 
 
 
