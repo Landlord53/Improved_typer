@@ -133,18 +133,37 @@ infer_expr_tp(Expr, Vars, Call_stack) ->
 		_Simple_type    -> {infer_simple_type(Expr), Vars}
 	end.
 
+
 infer_if_expr(If_expr, Vars, Call_stack) ->
 	Clause_exprs = ?Query:exec(If_expr, [exprcl]),
-	{Clauses_tp, Upd_vars} = infer_if_clauses(Clause_exprs, Vars, Call_stack, [], []),
-	{{any, []}, Vars}.
+	infer_if_clauses(Clause_exprs, Vars, Call_stack, [], []).
 
 
+infer_if_clauses([], Vars, Call_stack, Clauses_tp, Clauses_vars) ->
+	Upd_vars = Vars ++ Clauses_vars, 
+	Case_clause_tp = 
+		case length(Clauses_tp) of
+			0 -> {none, []};
+			1 -> hd(Clauses_tp);
+			_ -> {union, Clauses_tp}
+		end,
+
+	{Case_clause_tp, Upd_vars};
 infer_if_clauses([Clause_expr | Clause_exprs], Vars, Call_stack, Clauses_tp, Clauses_vars) ->
-	Guard =
-	    case ?Query:exec(Clause_expr, ?Clause:guard()) of
-	    	[]      -> [];
-	    	[Guard_expr] -> Guard_expr
-	    end.
+	[Guard] = ?Query:exec(Clause_expr, ?Clause:guard()),
+
+	case filter_clause_by_guards(Guard, Vars) of
+		true     -> {Clause_tp, Upd_vars} = get_clause_type(Clause_expr, Vars, Call_stack),
+		            Clause_vars = Upd_vars -- Vars,
+		            Upd_clauses_vars  = unite_case_clauses_vars(Clause_vars, Clauses_vars),
+		            infer_if_clauses([], Vars, Call_stack, [Clause_tp | Clauses_tp], Upd_clauses_vars);
+		possibly -> {Clause_tp, Upd_vars} = get_clause_type(Clause_expr, Vars, Call_stack),
+		            Clause_vars = Upd_vars -- Vars,
+		            Upd_clauses_vars  = unite_case_clauses_vars(Clause_vars, Clauses_vars),
+		            infer_if_clauses(Clause_exprs, Vars, Call_stack, [Clause_tp | Clauses_tp], Upd_clauses_vars);	
+		false    -> infer_if_clauses(Clause_exprs, Vars, Call_stack, Clauses_tp, Clauses_vars)	
+	end.
+
 
 %	case filter_clause_by_guards(Guard, Vars) of
 %		false    -> infer_if_clauses(Clause_exprs, Vars, Call_stack, Clauses_tp, Clauses_vars);
@@ -221,10 +240,10 @@ infer_implicit_fun_expr(Implicit_fun_expr, _Vars) ->
 
 	case ?Expr:value(Fun_info_expr) of
 		':' -> 	[Mod_name_expr, Fun_name_expr] = ?Query:exec(Fun_info_expr, ?Expr:children()),
-				{implicit_fun, {{external_mod, ?Expr:value(Mod_name_expr)}, ?Expr:value(Fun_name_expr), ?Expr:value(Arity_expr)}};
+				{implicit_fun, [{external_mod, ?Expr:value(Mod_name_expr)}, ?Expr:value(Fun_name_expr), ?Expr:value(Arity_expr)]};
 		_   ->  Function = ?Query:exec(Implicit_fun_expr, ?Expr:function()),
 				[Fun_mod] = ?Query:exec(Function, ?Fun:module()),
-				{implicit_fun, {{current_mod, ?Mod:name(Fun_mod)}, ?Expr:value(Fun_info_expr), ?Expr:value(Arity_expr)}}
+				{implicit_fun, [{current_mod, ?Mod:name(Fun_mod)}, ?Expr:value(Fun_info_expr), ?Expr:value(Arity_expr)]}
 	end.
 
 
@@ -237,10 +256,12 @@ infer_var_type(Var_expr, Vars) ->
 	end.
 
 infer_simple_type(Expr) ->
-	case ?Expr:value(Expr) of
+	Expr_val = ?Expr:value(Expr),
+	
+	case Expr_val of
 		true  -> {boolean, [true]};
 		false -> {boolean, [false]};
-		_     -> {?Expr:type(Expr), [?Expr:value(Expr)]}
+		_     -> {?Expr:type(Expr), [Expr_val]}
 	end.
 
 
