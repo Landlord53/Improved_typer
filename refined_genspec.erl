@@ -165,11 +165,6 @@ infer_if_clauses([Clause_expr | Clause_exprs], Vars, Call_stack, Clauses_tp, Cla
 	end.
 
 
-%	case filter_clause_by_guards(Guard, Vars) of
-%		false    -> infer_if_clauses(Clause_exprs, Vars, Call_stack, Clauses_tp, Clauses_vars);
-%		possibly ->  
-
-
 infer_case_expr(Case_expr, Vars, Call_stack) ->
 	Head_expr = ?Query:exec(Case_expr, [headcl]),
 	Clauses_exprs = ?Query:exec(Case_expr, [exprcl]),
@@ -481,18 +476,25 @@ replace_clauses_params_with_args([Pat | Pats], Args) ->
 
 replace_clause_params_with_args([], [], Vars) -> Vars;
 replace_clause_params_with_args([Par | Pars], [Arg | Args], Vars) ->
-	case ?Expr:type(Par) of
-		variable -> Var_name = ?Expr:value(Par),
-					New_var = {Var_name, [Arg]},
-		            replace_clause_params_with_args(Pars, Args, [New_var | Vars]);
-		cons     -> {Ls_cons_in_cf, Upd_vars} = construct_and_convert_cons_to_cf(Par, Vars, []),
-					{_Expr_tp, Upd_vars2} = bound_cons_vars(Ls_cons_in_cf, Arg, Upd_vars),
-					replace_clause_params_with_args(Pars, Args, Upd_vars2);
-		tuple    -> {Ls_tuple_in_cf, Upd_vars} = construct_and_convert_tuple_to_cf(Par, Vars, []),
-					{_Expr_tp, Upd_vars2} = bound_tuple_vars(Ls_tuple_in_cf, Arg, Arg, Upd_vars),
-					replace_clause_params_with_args(Pars, Args, Upd_vars2);
-		_Other   -> replace_clause_params_with_args(Pars, Args, Vars)	
-	end.
+	{Par_tp, _Upd_vars} = infer_expr_tp(Par, [], []),
+
+	case are_matching_types(Par_tp, Arg) of
+		false -> [];
+		_     -> 	case ?Expr:type(Par) of
+						variable -> Var_name = ?Expr:value(Par),
+									New_var = {Var_name, [Arg]},
+						            replace_clause_params_with_args(Pars, Args, [New_var | Vars]);
+						cons     -> {Ls_cons_in_cf, Upd_vars} = construct_and_convert_cons_to_cf(Par, Vars, []),
+									{_Expr_tp, Upd_vars2} = bound_cons_vars(Ls_cons_in_cf, Arg, Upd_vars),
+									replace_clause_params_with_args(Pars, Args, Upd_vars2);
+						tuple    -> {Ls_tuple_in_cf, Upd_vars} = construct_and_convert_tuple_to_cf(Par, Vars, []),
+									{_Expr_tp, Upd_vars2} = bound_tuple_vars(Ls_tuple_in_cf, Arg, Arg, Upd_vars),
+									replace_clause_params_with_args(Pars, Args, Upd_vars2);
+						_Other   -> replace_clause_params_with_args(Pars, Args, Vars)	
+					end
+    end.
+
+
 
 
 infer_parenthesis_inf(Expr, Vars, Call_stack) ->
@@ -660,7 +662,8 @@ generalize_term({Tp, Elem_val}, _Elems_tbl) when (Tp == fun_expr) or (Tp == impl
 	{Tp, Elem_val};
 generalize_term({union, Elem_val}, Elems_tbl) ->
 	Upd_elems_tbl = upd_elems_tbl_with_new_elems(Elem_val, Elems_tbl),
-	convert_elems_tbl_to_internal_format(Upd_elems_tbl, []);
+	Elems_tbl_secs = tuple_to_list(Upd_elems_tbl),
+	convert_elems_tbl_to_internal_format(Elems_tbl_secs, []);
 generalize_term({boolean, Elem_val}, _Elems_tbl) ->
 	{boolean, Elem_val};
 generalize_term({Elem_tp, Elem_val}, _Elems_tbl) when (Elem_tp == neg_integer) or (Elem_tp == pos_integer) 
@@ -1616,6 +1619,7 @@ filter_clause_by_guards(Guard, Vars) ->
 compare_pat_with_actual_pars([], [], Status) ->
 	Status;
 compare_pat_with_actual_pars([Pat_elem | Pat_elems], [Par | Pars], Status) ->
+	%erlang:display({Pat_elems, Par}),
 	case are_matching_types(Pat_elem, Par) of
 		false    -> false;
 		possibly -> compare_pat_with_actual_pars(Pat_elems, Pars, possibly);
@@ -1744,6 +1748,12 @@ are_matching_types({Type, []}, {Type, []}) when (Type == float) or (Type == atom
                                              or (Type == boolean) or (Type == fun_expr) 
                                              or (Type == implicit_fun)->
 	possibly;
+are_matching_types({integer, []}, {Tp2, []}) when (Tp2 == neg_integer) or (Tp2 == pos_integer) 
+                                               or (Tp2 == non_neg_integer) or (Tp2 == integer) ->
+    possibly;
+are_matching_types({Tp1, []}, {integer, []}) when (Tp1 == neg_integer) or (Tp1 == pos_integer) 
+                                               or (Tp1 == non_neg_integer) or (Tp1 == integer) ->
+    possibly;
 are_matching_types({variable, _Value}, _Tp2) ->
 	possibly;
 are_matching_types(_Tp1, {variable, _Value}) ->
@@ -1927,7 +1937,10 @@ improve_typer_ret_val(Mod_name, Fun_name, Arity, Args_sec, Ret_tp_in_str) ->
 		case Typer_ret_tp of
 			{none, []} -> {none, []};
 			_          -> Re_ret_tp = infer_fun_type(Mod_name, Fun_name, Arity, []),
-						  filter_typer_res(Typer_ret_tp, Re_ret_tp)
+			              case Re_ret_tp of
+				              [] -> {none, []};
+							  _  -> filter_typer_res(Typer_ret_tp, Re_ret_tp)
+						  end
 		end,
 	Res_in_typer_format = convert_elem_to_tf(Improved_ret_tp),
 	"-spec " ++ atom_to_list(Fun_name) ++ Args_sec ++ " -> " ++ Res_in_typer_format ++ ".".
@@ -2961,12 +2974,6 @@ start_testing(Mod_name) ->
 	infer_fun_types_for_testing(Specs, Mod_name).
 
 
-
-
-
-
-
-
 %--------------------------------Testing------------------------------------------
 print_expr_val(Expr) ->
 	Actual_vals = extract_expr_vals([Expr], [], []),
@@ -2974,137 +2981,4 @@ print_expr_val(Expr) ->
 	case ?Expr:type() of
 		tuple -> erlang:list_to_tuple(Actual_vals);
 		_     -> Actual_vals
-	end.
-%--------------------------------Defining of actual ret type----------------------
-
-
-
-define_simple_type("float()") ->
-	[float, number];
-define_simple_type("integer()") ->
-	[integer, number];
-define_simple_type("number()") ->
-	[number];
-define_simple_type("atom()") -> 
-	[atom];
-define_simple_type(A) ->
-	REs = ["\\d+\.\\d+", "\\d+", "\'.+\'"],
-	Matches = [re:run(A, RE, [{capture, first, list}]) || RE <- REs],
-
-	case Matches of
-		[{match, [A]}, _, _] -> erlang:list_to_float(A);
-		[_, {match, [A]}, _] -> erlang:list_to_integer(A);
-		[_, _, {match, [A]}] -> erlang:list_to_atom(lists:droplast(tl(A)))
-	end.
-
-%-----------------Код ненужный на данный момент-------------
-
-
-convert_values_in_compound_format_to_basic([]) -> [];
-convert_values_in_compound_format_to_basic({empty_list, []}) ->
-	{empty_list, []};
-convert_values_in_compound_format_to_basic([H | T]) ->
-	[convert_value_in_compound_format_to_basic(H) | convert_values_in_compound_format_to_basic(T)];
-convert_values_in_compound_format_to_basic(Val) ->
-	convert_value_in_compound_format_to_basic(Val).
-
-convert_value_in_compound_format_to_basic({empty_list, []}) -> 
-	[];
-convert_value_in_compound_format_to_basic({'...', Val}) -> 
-	{'...', Val};
-convert_value_in_compound_format_to_basic({Type, []}) ->
-	{Type, []};
-convert_value_in_compound_format_to_basic({Type, [Val]}) when is_integer(Type) or is_float(Type) or is_atom(Type) or is_boolean(Type) ->
-	Val;
-convert_value_in_compound_format_to_basic({variable, Val}) ->
-	{variable, Val};
-convert_value_in_compound_format_to_basic({List_type, Values}) when (List_type == ungen_list) ->
-	convert_values_in_compound_format_to_basic(Values);
-convert_value_in_compound_format_to_basic({tuple, Values}) ->
-	Tuple_elems_list = convert_values_in_compound_format_to_basic(Values),
-	list_to_tuple(Tuple_elems_list).
-
-%--------------------------Looking for actual clauses-----
-	
-
-compare_terms([], []) -> true;
-compare_terms([Pat | Pats], [Par | Pars]) ->
-	Param_type = ?Expr:type(Par),
-	Pat_type = ?Expr:type(Pat),
-
-	case {Param_type, Pat_type} of
-		{cons, cons}     -> case compare_cons(Pat, Par) of
-						   		true  -> compare_terms(Pats, Pars);
-						   		possibly -> compare_terms(Pats, Pars);
-								false -> false
-							end;
-		{tuple, tuple} -> case compare_tuples(Pat, Par) of
-						   		true  -> compare_terms(Pats, Pars);
-						   		possibly -> compare_terms(Pats, Pars);
-								false -> false
-							end;
-		{_, variable}    -> possibly;
-		{variable, _}    -> possibly;
-		_                -> case compare_simple_type(Pat, Par) of
-								true  -> compare_terms(Pats, Pars);
-								possibly -> compare_terms(Pats, Pars);
-								false -> false
-							end
-	end.
-
-compare_tuples(T1, T2) ->
-	Children1 = ?Query:exec(T1, ?Expr:children()),
-	Children2 = ?Query:exec(T2, ?Expr:children()),
-
-	if
-		length(Children1) == length(Children2) -> compare_terms(Children1, Children2);
-		true                                   -> false
-	end.
-
-compare_cons(Con1, Con2) ->
-	List_elems1 = construct_list_from_cons_expr(Con1, [], []),
-	List_elems2 = construct_list_from_cons_expr(Con2, [], []),
-
-	compare_lists_elems(List_elems1, List_elems2, true).
-
-compare_simple_type(Pat, Par) ->
-	?Expr:value(Pat) =:= ?Expr:value(Par).
-
-compare_lists_elems(_, _, false) ->
-	false;
-compare_lists_elems(L, L, Status) -> Status;
-compare_lists_elems([{'...', _Value}], _, _) ->
-	possibly;
-compare_lists_elems(_, [{'...', _Value}], _) ->
-	possibly;
-compare_lists_elems([], _L2, _) ->
-	false;
-compare_lists_elems(_L1, [], _) ->
-	false;
-compare_lists_elems([{variable, _} | T1], [_ | T2], _) ->
-	compare_lists_elems(T1, T2, possibly);
-compare_lists_elems([_ | T1], [{variable, _} | T2], _) ->
-	compare_lists_elems(T1, T2, possibly);
-compare_lists_elems([H1 | T1], [H2 | T2], Status) when erlang:is_list(H1) and erlang:is_list(H2) ->
-	Result = compare_lists_elems(H1, H2, Status),
-
-	case Result of
-		false -> false;
-		possibly -> compare_lists_elems(T1, T2, possibly);
-		true     -> compare_lists_elems(T1, T2, Status)
-	end;
-compare_lists_elems([H1 | T1], [H2 | T2], Status) when erlang:is_tuple(H1) and erlang:is_tuple(H2) ->
-	Tuple1 = erlang:tuple_to_list(H1),
-	Tuple2 = erlang:tuple_to_list(H2),
-	Result = compare_lists_elems(Tuple1, Tuple2, Status),
-
-	case Result of
-		false -> false;
-		possibly -> compare_lists_elems(T1, T2, possibly);
-		true     -> compare_lists_elems(T1, T2, Status)
-	end;
-compare_lists_elems([H1 | T1], [H2 | T2], Status) ->
-	case H1 == H2 of
-		true -> compare_lists_elems(T1, T2, Status);
-		false -> false
 	end.

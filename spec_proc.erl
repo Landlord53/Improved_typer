@@ -29,7 +29,7 @@ process_spec(Spec) ->
 process_spec_union(Spec) ->
     Children = ?Query:exec(Spec, ?Typexp:children()),
     Spec_return_tps = process_spec_union_elems(Children),
-    {union, lists:concat(Spec_return_tps)}.
+    [{union, lists:concat(Spec_return_tps)}].
 
 process_spec_union_elems([]) -> [];
 process_spec_union_elems([Elem | Elems]) ->
@@ -198,9 +198,7 @@ get_literal_type(Elem) ->
 		_      -> case ?Typexp:tag(Elem) of
                     true  -> {boolean, [?Typexp:tag(Elem)]};
                     false -> {boolean, [?Typexp:tag(Elem)]};
-                    _     -> A = {?Typexp:type(Elem), [?Typexp:tag(Elem)]},
-                             %erlang:display(A),
-                             A
+                    _     -> {?Typexp:type(Elem), [?Typexp:tag(Elem)]}
                   end
 	end.
 
