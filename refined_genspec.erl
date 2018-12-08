@@ -36,11 +36,12 @@
 -define(LISTS_SEC_INDEX, 5).
 -define(TUPLES_SEC_INDEX, 6).
 %Pay attention that the IMPROPER_ELEMS_SEC_INDEX has to be always the last element of the POSSIBLE_TYPES macros.
--define(IMPROPER_ELEMS_SEC_INDEX, 7). 
--define(UNION_INDEX, 8).
+-define(PIDS_SEC_INDEX, 7). 
+-define(IMPROPER_ELEMS_SEC_INDEX, 8). 
+-define(UNION_INDEX, 9).
 
 -define(ELEMS_TBL, {
-		{any, []}, {bools, []}, {nums, []}, {atoms, []}, {lists, []}, {tuples, []}, {improper_elems, []}
+		{any, []}, {bools, []}, {nums, []}, {atoms, []}, {lists, []}, {tuples, []}, {pids, []} ,{improper_elems, []}
 	}).
 
 -define(LIST_TYPES, [
@@ -117,6 +118,8 @@ define_bodies_type([Body | Bodies], Vars, Call_stack) ->
 
 infer_expr_tp(Expr, Vars, Call_stack) ->
 	case ?Expr:type(Expr) of
+		string          -> infer_string(Expr, Vars, Call_stack);
+		send_expr       -> infer_send_expr(Expr, Vars, Call_stack);
 		receive_expr    -> infer_receive_expr(Expr, Vars, Call_stack);
 		if_expr         -> infer_if_expr(Expr, Vars, Call_stack);
 		case_expr       -> infer_case_expr(Expr, Vars, Call_stack);
@@ -133,6 +136,17 @@ infer_expr_tp(Expr, Vars, Call_stack) ->
 		implicit_fun    -> {infer_implicit_fun_expr(Expr, Vars), Vars};
 		_Simple_type    -> {infer_simple_type(Expr), Vars}
 	end.
+
+
+infer_string(Expr, _Vars, _Call_stack) ->
+	Str_val = ?Expr:value(Expr),
+	Str_in_cf = convert_value_in_basic_format_to_compound(Str_val),
+	{generalize_term(Str_in_cf, []), []}.
+
+
+infer_send_expr(Expr, Vars, Call_stack) ->
+	[_Pid, Msg] = ?Query:exec(Expr, ?Expr:children()),
+	infer_expr_tp(Msg, Vars, Call_stack).
 
 
 infer_receive_expr(Receive_expr, Vars, Call_stack) ->
@@ -366,7 +380,9 @@ infer_BIF_fun_tp(Fun_name, _Arg_lst) when (Fun_name == is_atom)     or (Fun_name
 		                              or (Fun_name == is_tuple) ->
 	{boolean, []};
 infer_BIF_fun_tp(tuple_to_list, _Arg_lst) ->
-	{list, [{any, []}]}.
+	{list, [{any, []}]};
+infer_BIF_fun_tp(Fun_name, _Arg_lst) when (Fun_name == spawn) or (Fun_name == self) ->
+	{pid, []}.
 
 
 infer_internal_fun_tp(Mod_name, Fun_name, Arg_lst_expr, Vars, Call_stack) ->
@@ -695,9 +711,8 @@ generalize_term({boolean, Elem_val}, _Elems_tbl) ->
 	{boolean, Elem_val};
 generalize_term({Elem_tp, Elem_val}, _Elems_tbl) when (Elem_tp == neg_integer) or (Elem_tp == pos_integer) 
 	                                               or (Elem_tp == non_neg_integer) or (Elem_tp == integer) 
-	                                               or (Elem_tp == float) or (Elem_tp == number) ->
-	{Elem_tp, Elem_val};
-generalize_term({Elem_tp, Elem_val}, _Elems_tbl) when (Elem_tp == atom) ->
+	                                               or (Elem_tp == float) or (Elem_tp == number) 
+	                                               or (Elem_tp == atom) or (Elem_tp == pid)->
 	{Elem_tp, Elem_val};
 generalize_term({Elem_tp, Elem_val}, Elems_tbl) when (Elem_tp == empty_list) or (Elem_tp == ungen_list)
 												  or (Elem_tp == nonempty_list)
@@ -745,6 +760,8 @@ upd_elems_tbl_with_new_elem({Elem_tp, Elem_val}, Elems_tbl) when (Elem_tp == neg
 	upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?NUMS_SEC_INDEX);
 upd_elems_tbl_with_new_elem({Elem_tp, Elem_val}, Elems_tbl) when (Elem_tp == atom) ->
 	upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?ATOMS_SEC_INDEX);
+upd_elems_tbl_with_new_elem({Elem_tp, Elem_val}, Elems_tbl) when (Elem_tp == pid) ->
+	upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?PIDS_SEC_INDEX);
 upd_elems_tbl_with_new_elem({Elem_tp, Elem_val}, Elems_tbl) when (Elem_tp == empty_list) or (Elem_tp == ungen_list)
 												              or (Elem_tp == nonempty_list)
 												              or (Elem_tp == nonempty_improper_list) or (Elem_tp == maybe_improper_list)
@@ -831,11 +848,18 @@ upd_elems_tbl_by_index({Tp, Val}, Elems_tbl, Index) ->
 		?NUMS_SEC_INDEX           -> upd_numbers_sec({Tp, Val}, Sec);
 		?ATOMS_SEC_INDEX          -> upd_atoms_sec({Tp, Val}, Sec);
 		?LISTS_SEC_INDEX          -> upd_lst_sec({Tp, Val}, Sec);
-		?TUPLES_SEC_INDEX         -> upd_tuple_sec({tuple, Val}, Sec)
+		?TUPLES_SEC_INDEX         -> upd_tuple_sec({tuple, Val}, Sec);
+		?PIDS_SEC_INDEX           -> upd_pids_sec({Tp, Val}, Sec)
 %		?IMPROPER_ELEMS_SEC_INDEX -> upd_improp_elems_sec({Tp, Val}, Sec)
 	end,
 
 	setelement(Index, Elems_tbl, Upd_sec).
+
+
+upd_pids_sec({pid, []}, {pids, []}) ->
+	{pids, [{pid, []}]};
+upd_pids_sec({pid, []}, {pids, [{pid, []}]}) ->
+	{pids, [{pid, []}]}.
 
 
 upd_tuple_sec({Tp, Val}, Sec) ->
@@ -934,7 +958,9 @@ generalize_lst({Lst_tp, [{Elem_tp, Elem_val} | T]}, Elems_tbl) when ((Elem_tp ==
 	                                                                      or (Elem_tp == number)) ->
 	Upd_elems_tbl = upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?NUMS_SEC_INDEX),
 	generalize_lst({Lst_tp, T}, Upd_elems_tbl);
-
+generalize_lst({Lst_tp, [{Elem_tp, Elem_val} | T]}, Elems_tbl) when (Elem_tp == pid) ->
+	Upd_elems_tbl = upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?PIDS_SEC_INDEX),
+	generalize_lst({Lst_tp, T}, Upd_elems_tbl);
 generalize_lst({Lst_tp, [{Elem_tp, Elem_val} | T]}, Elems_tbl) when Elem_tp == atom ->
 	Upd_elems_tbl = upd_elems_tbl_by_index({Elem_tp, Elem_val}, Elems_tbl, ?ATOMS_SEC_INDEX),
 	generalize_lst({Lst_tp, T}, Upd_elems_tbl);
@@ -1532,7 +1558,7 @@ convert_value_in_basic_format_to_compound({Tp, Val}) when (Tp == empty_list) or 
 														   or (Tp == neg_integer) or (Tp == pos_integer)
 														   or (Tp == non_neg_integer) or (Tp == integer)
 														   or (Tp == float) or (Tp == number) or (Tp == any)
-														   or (Tp == {none, []}) -> 
+														   or (Tp == pid) or (Tp == {none, []}) -> 
 	{Tp, Val};
 convert_value_in_basic_format_to_compound({'...', Val}) -> 
 	{'...', Val};
@@ -1646,7 +1672,6 @@ filter_clause_by_guards(Guard, Vars) ->
 compare_pat_with_actual_pars([], [], Status) ->
 	Status;
 compare_pat_with_actual_pars([Pat_elem | Pat_elems], [Par | Pars], Status) ->
-	%erlang:display({Pat_elems, Par}),
 	case are_matching_types(Pat_elem, Par) of
 		false    -> false;
 		possibly -> compare_pat_with_actual_pars(Pat_elems, Pars, possibly);
@@ -1713,9 +1738,12 @@ are_matching_types({union, Elems1}, Elem2) ->
 are_matching_types(Elem1, {union, Elems2}) ->
 	is_union_match({union, Elems2}, Elem1);
 
+
+are_matching_types({pid, []}, {pid, []}) ->
+	possibly;
 are_matching_types({number, _Val1}, {Tp2, _Val2}) when (Tp2 == neg_integer) or (Tp2 == pos_integer) 
-												      or (Tp2 == non_neg_integer) or (Tp2 == integer) 
-												      or (Tp2 == float) or (Tp2 == number) ->
+												    or (Tp2 == non_neg_integer) or (Tp2 == integer) 
+												    or (Tp2 == float) or (Tp2 == number) ->
 	possibly;
 are_matching_types({Tp1, _Val1}, {number, _Val2}) when (Tp1 == neg_integer) or (Tp1 == pos_integer) 
 													or (Tp1 == non_neg_integer) or (Tp1 == integer) 
