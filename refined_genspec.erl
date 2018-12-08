@@ -117,6 +117,7 @@ define_bodies_type([Body | Bodies], Vars, Call_stack) ->
 
 infer_expr_tp(Expr, Vars, Call_stack) ->
 	case ?Expr:type(Expr) of
+		receive_expr    -> infer_receive_expr(Expr, Vars, Call_stack);
 		if_expr         -> infer_if_expr(Expr, Vars, Call_stack);
 		case_expr       -> infer_case_expr(Expr, Vars, Call_stack);
 		prefix_expr     -> {infer_prefix_expr_type(Expr, ?Expr:value(Expr), Vars, Call_stack), Vars};
@@ -134,12 +135,38 @@ infer_expr_tp(Expr, Vars, Call_stack) ->
 	end.
 
 
+infer_receive_expr(Receive_expr, Vars, Call_stack) ->
+	After_clause_in_lst = ?Query:exec(Receive_expr, [aftercl]),
+	Clauses = ?Query:exec(Receive_expr, [exprcl]),
+
+	case After_clause_in_lst of
+		[]             -> infer_receive_clauses(Clauses, Vars, Call_stack, [], []);
+		[After_clause] -> infer_receive_clauses([After_clause | Clauses], Vars, Call_stack, [], [])
+	end.
+
+
+infer_receive_clauses([], Vars, _Call_stack, Clauses_tp, Clauses_vars) ->
+	Upd_vars = Vars ++ Clauses_vars, 
+	Case_clause_tp = 
+		case length(Clauses_tp) of
+			0 -> {none, []};
+			1 -> hd(Clauses_tp);
+			_ -> {union, Clauses_tp}
+		end,
+	{Case_clause_tp, Upd_vars};
+infer_receive_clauses([Clause_expr | Clause_exprs], Vars, Call_stack, Clauses_tp, Clauses_vars) ->
+	{Clause_tp, Upd_vars} = get_clause_type(Clause_expr, Vars, Call_stack),
+	Clause_vars = Upd_vars -- Vars,
+	Upd_clauses_vars = unite_case_clauses_vars(Clause_vars, Clauses_vars),
+	infer_receive_clauses(Clause_exprs, Vars, Call_stack, [Clause_tp | Clauses_tp], Upd_clauses_vars).
+
+
 infer_if_expr(If_expr, Vars, Call_stack) ->
 	Clause_exprs = ?Query:exec(If_expr, [exprcl]),
 	infer_if_clauses(Clause_exprs, Vars, Call_stack, [], []).
 
 
-infer_if_clauses([], Vars, Call_stack, Clauses_tp, Clauses_vars) ->
+infer_if_clauses([], Vars, _Call_stack, Clauses_tp, Clauses_vars) ->
 	Upd_vars = Vars ++ Clauses_vars, 
 	Case_clause_tp = 
 		case length(Clauses_tp) of
@@ -1216,7 +1243,7 @@ compute_infix_expr({boolean, [Value1]}, {boolean, [Value2]}, ',') ->
 	{boolean, [Value1 and Value2]};
 compute_infix_expr({boolean, [Value1]}, {boolean, [Value2]}, ';') ->
 	{boolean, [Value1 or Value2]};
-compute_infix_expr(Expr1, Expr2, Operation) when (Operation == ',') or (Operation == ';') ->
+compute_infix_expr(_Expr1, _Expr2, Operation) when (Operation == ',') or (Operation == ';') ->
 	{boolean, []};
 compute_infix_expr({any, []}, {any, []}, '++') ->
 	{list, [{any, []}]};
@@ -2946,7 +2973,7 @@ infer_fun_types_for_testing([Spec | Specs], Mod_name) ->
 
 
 infer_one_fun(Spec, Mod_name) ->
-	{Fun_name_in_str, Arity, Args_sec, Ret_tp_in_str} = get_fun_info(Spec, []),
+	{Fun_name_in_str, Arity, Args_sec, _Ret_tp_in_str} = get_fun_info(Spec, []),
 	Mod_node = ?Query:exec(?Mod:find(Mod_name)),
 	Fun_name = list_to_atom(Fun_name_in_str),
 
