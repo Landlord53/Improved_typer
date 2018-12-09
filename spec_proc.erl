@@ -161,7 +161,7 @@ get_list_type(List) ->
 		any          -> Children = ?Query:exec(List, ?Typexp:children()),
 				 		{ungen_list, get_spec_elems_type(Children)};
 		nonempty     -> Children = ?Query:exec(List, ?Typexp:children()),
-				 		{ungen_list, get_spec_elems_type(Children) ++ {['...'], ["Undefined"]}}
+				 		{ungen_list, get_spec_elems_type(Children)}
 	end.
 		
 get_tuple_type(Arg) ->

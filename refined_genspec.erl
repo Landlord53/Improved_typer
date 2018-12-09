@@ -55,7 +55,8 @@
 				is_atom, is_binary, is_bitstring, is_boolean,
 				is_float ,is_function, is_integer, is_list, 
 				is_map, is_number, is_pid, is_port,
-				is_record, is_reference, is_tuple, tuple_to_list
+				is_record, is_reference, is_tuple, tuple_to_list,
+				spawn, self, exit, hd, tl
     ]).
 
 infer_fun_type(Mod_name, Fun_name, Arity, []) ->
@@ -382,6 +383,18 @@ infer_BIF_fun_tp(Fun_name, _Arg_lst) when (Fun_name == is_atom)     or (Fun_name
 	{boolean, []};
 infer_BIF_fun_tp(tuple_to_list, _Arg_lst) ->
 	{list, [{any, []}]};
+infer_BIF_fun_tp(exit, [Reason]) ->
+	{atom, [exit]};
+infer_BIF_fun_tp(exit, [Pid, Reason]) ->
+	{boolean, [true]};
+infer_BIF_fun_tp(hd, {any, []}) ->
+	{any, []};
+infer_BIF_fun_tp(hd, {Lst_tp, [Prop_sec, Improp_sec]}) ->
+	Prop_sec;
+infer_BIF_fun_tp(hd, {Lst_tp, [Prop_sec]}) ->
+	Prop_sec;
+infer_BIF_fun_tp(hd, _) ->
+	{none, []};
 infer_BIF_fun_tp(Fun_name, _Arg_lst) when (Fun_name == spawn) or (Fun_name == self) ->
 	{pid, []}.
 
@@ -575,6 +588,10 @@ bound_tuple_vars({ungen_tuple, []}, {tuple, []}, Match_expr_tp, Vars) ->
 	{Match_expr_tp, Vars};
 bound_tuple_vars(_Ls_tuple, {any, []}, _Match_expr_tp, Vars) ->
 	{{any, []}, Vars};
+
+bound_tuple_vars({ungen_tuple, Pat = [{variable, [Var_name]} | Ls_elems]}, {union, Elems}, Match_expr_tp, Vars) ->
+	Tuple = find_tuple_among_elems(Elems, length(Pat)),
+	bound_tuple_vars({ungen_tuple, Pat}, Tuple, Tuple, Vars);
 bound_tuple_vars({ungen_tuple, [{variable, [Var_name]} | Ls_elems]}, {tuple, [Rs_elem | Rs_elems]}, Match_expr_tp, Vars) ->
 	{Rs_elem, Upd_vars} = bound_var_to_value(Var_name, Rs_elem, Vars), 
     bound_tuple_vars({ungen_tuple, Ls_elems}, {tuple, Rs_elems}, Match_expr_tp, Upd_vars);
@@ -699,9 +716,10 @@ generalize_elems([Elem | Elems], Elems_tbl) ->
 	Upd_elems_tbl = upd_elems_tbl_with_new_elem(Elem, Elems_tbl),
 	generalize_elems(Elems, Upd_elems_tbl).
 
-
+generalize_term({any, []}, []) ->
+	{any, []};
 generalize_term(Term, []) ->
-generalize_term(Term, ?ELEMS_TBL);
+	generalize_term(Term, ?ELEMS_TBL);
 generalize_term({Tp, Elem_val}, _Elems_tbl) when (Tp == fun_expr) or (Tp == implicit_fun) ->
 	{Tp, Elem_val};
 generalize_term({union, Elem_val}, Elems_tbl) ->
@@ -1173,10 +1191,12 @@ generalize_lst_tp(undef_list, Lst2) ->
 generalize_lst_tp(Lst1, undef_list) ->
 	Lst1;
 generalize_lst_tp(maybe_improper_list, Lst2) when (Lst2 == nonempty_list) or (Lst2 == nonempty_improper_list) 
-                                               or (Lst2 == nonempty_maybe_improper_list) or (Lst2 == list) ->
+                                               or (Lst2 == nonempty_maybe_improper_list) or (Lst2 == list)
+                                               or (Lst2 == empty_list) ->
 	maybe_improper_list;
 generalize_lst_tp(Lst1, maybe_improper_list) when (Lst1 == nonempty_list) or (Lst1 == nonempty_improper_list) 
-                                               or (Lst1 == nonempty_maybe_improper_list) or (Lst1 == list) ->
+                                               or (Lst1 == nonempty_maybe_improper_list) or (Lst1 == list)
+                                               or (Lst1 == empty_list) ->
 	maybe_improper_list;
 generalize_lst_tp(list, nonempty_improper_list) ->
 	 maybe_improper_list;
@@ -2128,7 +2148,8 @@ convert_elems_to_tf([]) -> [];
 convert_elems_to_tf([Elem | Elems]) ->
 	[convert_elem_to_tf(Elem) | convert_elems_to_tf(Elems)].
 
-
+convert_elem_to_tf({no_return, []}) ->
+	"no_return()";
 convert_elem_to_tf({Tp, [Val]}) when (Tp == neg_integer)     or (Tp == pos_integer)
                                   or (Tp == non_neg_integer) or (Tp == integer) -> 
     integer_to_list(Val);
@@ -2239,6 +2260,8 @@ convert_composite_elem(Ret_val_str, Elems, Is_union) ->
 	{Elem, Str_after_conv} = convert_single_elem(Ret_val_str),
 	convert_composite_elem(Str_after_conv, [Elem | Elems], Is_union).	
 
+convert_single_elem("no_return()" ++ T) ->
+	{{no_return, []}, T};
 convert_single_elem("none()" ++ T) ->
 	{{none, []}, T};
 convert_single_elem("neg_integer()" ++ T) ->
