@@ -118,6 +118,7 @@ define_bodies_type([Body | Bodies], Vars, Call_stack) ->
 
 infer_expr_tp(Expr, Vars, Call_stack) ->
 	case ?Expr:type(Expr) of
+		list_comp       -> {{list, [{any, []}]}, Vars};
 		string          -> infer_string(Expr, Vars, Call_stack);
 		send_expr       -> infer_send_expr(Expr, Vars, Call_stack);
 		receive_expr    -> infer_receive_expr(Expr, Vars, Call_stack);
@@ -1204,7 +1205,11 @@ generalize_lst_tp(nonempty_improper_list, nonempty_list) ->
 generalize_lst_tp(nonempty_list, nonempty_improper_list) ->
 	nonempty_maybe_improper_list.
 
-
+infer_infix_expr_type(Expr, Operation, Vars, Call_stack) when (Operation == 'orelse') or (Operation == 'andalso') ->
+	[Sub_expr1, Sub_expr2] = ?Query:exec(Expr, [exprcl]),
+    {Clause1_tp, _} = get_clause_type(Sub_expr1, Vars, Call_stack),
+    {Clause2_tp, _} = get_clause_type(Sub_expr2, Vars, Call_stack),
+    compute_infix_expr(Clause1_tp, Clause2_tp, Operation);	
 infer_infix_expr_type(Expr, Operation, Vars, Call_stack) ->
 	[Sub_expr1, Sub_expr2] = get_children(Expr),
 	{Expr_inf1, Upd_vars} = infer_expr_tp(Sub_expr1, Vars, Call_stack),
@@ -1283,6 +1288,9 @@ compute_infix_expr(Lst1, Lst2, '++') ->
 	{Concat_op_res, _} = generalize_elems([Lst1, Lst2], []),
 	Concat_op_res;
 
+compute_infix_expr(Lst1, Lst2, '--') ->
+	Lst1;
+
 compute_infix_expr({union, Union_elems1}, {union, Union_elems2}, Operation) -> 
 	Two_unions_merged = [compute_infix_expr(Union_elem1, Union_elem2, Operation) || 
 							Union_elem1 <- Union_elems1, Union_elem2 <- Union_elems2],
@@ -1292,11 +1300,15 @@ compute_infix_expr({union, Union_elems}, Expr2, Operation) ->
 compute_infix_expr(Expr1, {union, Union_elems}, Operation) -> 
 	{union, lists:map(fun(Expr2) -> compute_infix_expr(Expr1, Expr2, Operation) end, Union_elems)};
 
+compute_infix_expr({boolean, [true]}, _Rs_expr, 'orelse') ->
+	{boolean, [true]};
 compute_infix_expr({boolean, []}, _Rs_expr, Operation) when (Operation == 'and') or (Operation == 'or')
-														 or (Operation == 'xor')  ->
+														 or (Operation == 'xor') or ('orelse')
+														 or (Operation == 'andalso')  ->
 	{boolean, []};
 compute_infix_expr(_Ls_expr, {boolean,[]}, Operation) when (Operation == 'and') or (Operation == 'or')
-													    or (Operation == 'xor')  ->
+													    or (Operation == 'xor') or ('orelse')
+													    or (Operation == 'andalso')  ->
 	{boolean, []};
 compute_infix_expr({boolean, [Val1]}, {boolean, [Val2]}, 'and') ->
 	{boolean, [Val1 and Val2]};
@@ -1304,6 +1316,10 @@ compute_infix_expr({boolean, [Val1]}, {boolean, [Val2]}, 'or') ->
 	{boolean, [Val1 or Val2]};
 compute_infix_expr({boolean, [Val1]}, {boolean, [Val2]}, 'xor') ->
 	{boolean, [Val1 xor Val2]};
+compute_infix_expr({boolean, [Val1]}, {boolean, [Val2]}, 'orelse') ->
+	{boolean, [Val1 orelse Val2]};
+compute_infix_expr({boolean, [Val1]}, {boolean, [Val2]}, 'andalso') ->
+	{boolean, [Val1 andalso Val2]};
 compute_infix_expr({Tp1, [Val1]}, {Tp2, [Val2]}, '==') when ((Tp1 == neg_integer)     or (Tp1 == pos_integer) 
                                                           or (Tp1 == non_neg_integer) or (Tp1 == integer)
                                                           or (Tp1 == atom)            or (Tp1 == boolean)
